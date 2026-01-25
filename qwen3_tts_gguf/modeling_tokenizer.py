@@ -23,7 +23,9 @@ import torch
 from torch import nn
 from torch.nn import Parameter
 from torch.nn import functional as F
-from transformers import MimiConfig, MimiModel
+# from transformers import MimiConfig, MimiModel
+from .internal import MimiConfig, MimiModel
+# from transformers import MimiPreTrainedModel
 from transformers.activations import ACT2FN
 from transformers.cache_utils import Cache, DynamicCache
 from transformers.integrations import use_kernel_forward_from_hub
@@ -32,7 +34,6 @@ from transformers.masking_utils import (
     create_sliding_window_causal_mask,
 )
 from transformers.modeling_flash_attention_utils import FlashAttentionKwargs
-from transformers.modeling_layers import GradientCheckpointingLayer
 from transformers.modeling_outputs import BaseModelOutputWithPast
 from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_update
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedModel
@@ -416,7 +417,7 @@ class Qwen3TTSTokenizerV2DecoderLayerScale(nn.Module):
         return self.scale * x
 
 
-class Qwen3TTSTokenizerV2DecoderTransformerLayer(GradientCheckpointingLayer):
+class Qwen3TTSTokenizerV2DecoderTransformerLayer(nn.Module):
     def __init__(self, config: Qwen3TTSTokenizerV2DecoderConfig, layer_idx):
         super().__init__()
         self.hidden_size = config.hidden_size

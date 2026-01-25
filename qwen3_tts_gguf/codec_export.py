@@ -25,19 +25,23 @@ class CodecEncoderExportWrapper(nn.Module):
         super().__init__()
         self.config = model.config
         
-        # 1. 强力覆写配置，告诉所有子模块：只要 Tuples，不要 Dict/Object！
+        # 1. 强力覆写配置
         self.config.return_dict = False
-        if hasattr(model, 'encoder') and hasattr(model.encoder, 'config'):
-            model.encoder.config.return_dict = False
+        self.config.use_cache = False
         
-        # 2. 提取核心模块
+        # 2. 提取核心模块 (MimiModel 内部组件)
         self.mimi_model = model.encoder
         self.cnn_encoder = self.mimi_model.encoder 
+        self.transformer = self.mimi_model.encoder_transformer
+        self.downsample = self.mimi_model.downsample
         self.quantizer = self.mimi_model.quantizer
         
-        # 3. 锁定为评估模式
-        self.cnn_encoder.eval()
-        self.quantizer.eval()
+        # 3. 锁定为评估模式，并递归禁用 return_dict/use_cache
+        self.eval()
+        for m in self.modules():
+            if hasattr(m, 'config'):
+                m.config.return_dict = False
+                m.config.use_cache = False
 
     def forward(self, input_values):
         """
@@ -49,45 +53,48 @@ class CodecEncoderExportWrapper(nn.Module):
         # 1. Input: [B, T] -> [B, 1, T]
         x = input_values.unsqueeze(1)
         
-        # 2. Run CNN Encoder
-        # 即使 config.return_dict=False，MimiEncoder 有时还是会返回 tuple(BaseModelOutput) 或类似的怪东西
-        # 我们这里假设它返回 tuple
+        # 2. Step 1: CNN Encoder (SEANet)
+        # Returns [B, Hidden, T_inner]
         cnn_out = self.cnn_encoder(x)
-        
-        # 极为防御性的解包逻辑
-        if isinstance(cnn_out, tuple):
+        if isinstance(cnn_out, (tuple, list)):
             hidden_states = cnn_out[0]
-        elif hasattr(cnn_out, 'last_hidden_state'):
-            hidden_states = cnn_out.last_hidden_state
         else:
             hidden_states = cnn_out
 
-        # 3. Run Quantizer
-        # MimiVectorQuantizer.encode(hidden_states)
-        # 它的返回值通常是 VectorQuantizerOutput(audio_codes=..., audio_values=...)
-        # 或者是 tuple (audio_codes, audio_values)
-        try:
-            # 尝试强制不返回字典（部分版本支持此参数）
-            q_out = self.quantizer.encode(hidden_states, return_dict=False)
-        except TypeError:
-            # 如果不支持该参数，直接调用
-            q_out = self.quantizer.encode(hidden_states)
+        # 3. Step 2: Transformer Encoder
+        # Transformer expects [B, T_inner, Hidden]
+        hidden_states = hidden_states.transpose(1, 2)
         
-        # 再次防御性解包
-        if isinstance(q_out, tuple):
-            codes = q_out[0]
-        elif hasattr(q_out, 'audio_codes'):
-            codes = q_out.audio_codes
+        # return_dict=False is critical here
+        trans_out = self.transformer(hidden_states, return_dict=False)
+        
+        if isinstance(trans_out, (tuple, list)):
+            hidden_states = trans_out[0]
         else:
-            # 假设只有一个返回
-            codes = q_out
+            hidden_states = trans_out
+            
+        # 4. Step 3: Downsample (if configured)
+        # Downsample expects [B, Hidden, T_inner]
+        hidden_states = hidden_states.transpose(1, 2)
+        if self.downsample is not None:
+            hidden_states = self.downsample(hidden_states)
 
-        # 4. Qwen3 Slice Logic
-        valid_q = self.config.encoder_valid_num_quantizers
-        codes = codes[:, :valid_q, :]
+        # 5. Step 4: Quantizer (RVQ)
+        # MimiResidualVectorQuantizer.encode returns [Q, B, T]
+        codes = self.quantizer.encode(hidden_states)
         
-        # 5. Transpose: [B, Q, T] -> [B, T, Q]
-        codes = codes.transpose(1, 2)
+        # Defense against potential tuple/ModelOutput (though RVQ usually returns Tensor)
+        if isinstance(codes, (tuple, list)):
+            codes = codes[0]
+        elif hasattr(codes, 'audio_codes'):
+            codes = codes.audio_codes
+
+        # 6. Qwen3 Slice Logic: Just take the valid number of quantizers
+        valid_q = self.config.encoder_valid_num_quantizers
+        codes = codes[:valid_q, :, :] # Slice first dim [Q]
+        
+        # 7. Transpose to final format: [Q, B, T] -> [B, T, Q]
+        codes = codes.transpose(0, 1).transpose(1, 2)
         
         return codes
 
