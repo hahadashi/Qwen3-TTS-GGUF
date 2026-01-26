@@ -1,0 +1,6 @@
+{
+  "max_length": 2048,
+  "do_sample": false,
+  "temperature": 1.0,
+  "top_p": 1.0
+}
