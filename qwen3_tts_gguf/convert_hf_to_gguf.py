@@ -707,14 +707,12 @@ class ModelBase:
             return config
 
         try:
-            # for security reason, we don't allow loading remote code by default
-            # if a model need remote code, we will fallback to config.json
-            config = AutoConfig.from_pretrained(dir_model, trust_remote_code=False).to_dict()
-        except Exception as e:
-            logger.warning(f"Failed to load model config from {dir_model}: {e}")
-            logger.warning("Trying to load config.json instead")
+            # Force load from config.json to avoid AutoConfig interference
+            print(f"Force loading config.json from {dir_model}")
             with open(dir_model / "config.json", "r", encoding="utf-8") as f:
                 config = json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load model config from {dir_model}: {e}")
         if "llm_config" in config:
             # rename for InternVL
             config["text_config"] = config["llm_config"]
