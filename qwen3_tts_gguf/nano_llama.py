@@ -121,6 +121,7 @@ llama_vocab_eos = None
 llama_token_to_piece = None
 llama_get_memory = None
 llama_memory_clear = None
+llama_model_n_embd = None
 
 def init_llama_lib():
     """初始化 llama.cpp 库，自动从模块所在目录加载 DLL"""
@@ -130,7 +131,7 @@ def init_llama_lib():
     global llama_context_default_params, llama_init_from_model, llama_free
     global llama_batch_init, llama_batch_free
     global llama_decode, llama_get_logits, llama_set_embeddings, llama_get_embeddings, llama_tokenize
-    global llama_get_memory, llama_memory_clear
+    global llama_get_memory, llama_memory_clear, llama_model_n_embd
     global llama_vocab_n_tokens, llama_vocab_eos, llama_token_to_piece
     global _log_callback_ref
 
@@ -180,6 +181,10 @@ def init_llama_lib():
     llama_model_get_vocab = llama.llama_model_get_vocab
     llama_model_get_vocab.argtypes = [ctypes.c_void_p]
     llama_model_get_vocab.restype = ctypes.c_void_p
+
+    llama_model_n_embd = llama.llama_model_n_embd
+    llama_model_n_embd.argtypes = [ctypes.c_void_p]
+    llama_model_n_embd.restype = ctypes.c_int32
 
     # Context
     llama_context_default_params = llama.llama_context_default_params
