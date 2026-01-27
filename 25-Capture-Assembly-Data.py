@@ -88,6 +88,25 @@ def talker_forward_post_hook(module, input, output):
             print(f"[CAPTURE] Master Step 0 Result Codes Saved (Dim: {codec_ids.shape})")
             state.captured = True
 
+def backbone_forward_pre_hook(module, args, kwargs):
+    """
+    挂载在 talker.model (Backbone) 之前，捕获 Sum 之后的 inputs_embeds。
+    这是验证工匠生成的 Code 是否正确转为 Embedding 并求和的关键真值。
+    """
+    inputs_embeds = kwargs.get('inputs_embeds')
+    if inputs_embeds is None and len(args) > 0:
+        # Args signature: (input_ids, attention_mask, position_ids, past_key_values, inputs_embeds, ...)
+        # Check modeling definition. Qwen3TTSTalkerModel.forward signature.
+        # It's safer to rely on kwargs if possible, but transformers often use args.
+        pass
+        
+    if state.master_step == state.target_master_step:
+        # Generate 阶段，inputs_embeds 应该是 [B, 1, 2048]
+        if inputs_embeds is not None:
+             print(f"[CAPTURE] Master Backbone Step 0 Input Embeds Hooked.")
+             np.save(os.path.join(SAVE_DIR, "master_step_0_backbone_input.npy"), inputs_embeds.detach().cpu().to(torch.float32).numpy())
+    return None
+
 def main():
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     MODEL_PATH = os.path.abspath("Qwen3-TTS-12Hz-1.7B-CustomVoice")
@@ -105,6 +124,10 @@ def main():
         
         # 2. 挂载 Predictor Hooks
         talker.code_predictor.register_forward_pre_hook(predictor_generate_pre_hook, with_kwargs=True)
+        
+        # 3. 挂载 Backbone Hooks
+        # tts.model.talker.model 是 Qwen3TTSTalkerModel
+        talker.model.register_forward_pre_hook(backbone_forward_pre_hook, with_kwargs=True)
         
         # 固定随机性
         deterministic_kwargs = {

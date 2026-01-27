@@ -109,32 +109,123 @@ def run_assembly():
     sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     sess = ort.InferenceSession(ONNX_PATH, sess_options, providers=['CPUExecutionProvider'])
     
+    # Load all Embedding Tables (Codec 0-15)
+    # Codec 0 is Master Output / Craftsman Input Last ID
+    # Codec 1-15 are Craftsman Prediction Output embeddings
+    
+    print(f"[Craftsman ONNX] Loading Embedding Tables...")
+    embedding_tables = {}
+    for i in range(16):
+        path = os.path.join(MODEL_DIR, f"codec_embedding_{i}.npy")
+        if not os.path.exists(path):
+            print(f"❌ Missing embedding table: {path}")
+            return
+        embedding_tables[i] = np.load(path) # [N, 2048]
+
     # Prepare Empty Pasts (10 tensors) for Step 0
-    # Shape: (1, 8, 0, 128)
     current_pasts = {f"past_{i}": np.zeros((1, 8, 0, 128), dtype=np.float32) for i in range(10)}
     
-    inputs = {'inputs_embeds': hybrid_craftsman_input}
-    inputs.update(current_pasts)
+    # 获取 last_id_hidden 对应的 code
+    # official_craftsman_input 是 [gguf_past, last_id_hidden]
+    # 我们需要找到 last_id_hidden 是哪个 code 产生的。
+    # 从 capture 的 master_step_0_input_ids.npy 获取
+    master_step_0_input_ids = np.load(os.path.join(CAPTURED_DIR, "master_step_0_input_ids.npy"))
+    # 这通常是 Step 0 的 target，或者输入的 code。
+    # 在 T-T-S 场景，Generate 阶段的 input_ids 是刚刚生成的 token。
+    input_code_idx = master_step_0_input_ids[0, 0] # 标量
+    print(f"  Input Code Index (Master): {input_code_idx}")
     
-    print(f"[Craftsman ONNX] Running Inference (Step 0)...")
-    outputs = sess.run(None, inputs)
-    onnx_hidden = outputs[0] # [1, 1, 2048]
+    # 验证 last_id_hidden 与 embedding_table[0]
+    # gguf output 用的 prefill output.
+    # glue input part 2 should match embedding_table[0][input_code_idx]
     
-    # 5. 计算 Code
-    # Step 0 对应 Head 0 (预测第 1 个 code group, input 是 group 0)
-    head_weight = predictor_heads[0] # (3072, 2048)
-    onnx_logits = onnx_hidden[0, -1] @ head_weight.T # [3072]
-    onnx_code = np.argmax(onnx_logits)
+    last_id_embed = embedding_tables[0][input_code_idx].reshape(1, 1, 2048)
     
-    # Official Codes: [1, 16] -> [input, pred_0, pred_1, ... pred_14]
-    # We compare onnx_code vs official_final_codes[0, 1]
-    official_code_val = official_final_codes[0, 1]
+    # Recalculate hybrid input using pure embeddings for consistency if desired, 
+    # but let's stick to using GGUF output for the first part to prove GGUF linkage.
+    # hybrid_craftsman_input = [gguf_past_hidden, last_id_embed]
     
-    print(f"  [Check 2] ONNX Code vs Official Code (Step 0)")
-    print(f"  Official: {official_code_val}")
-    print(f"  ONNX    : {onnx_code}")
+    # 开始 15 步自回归
+    print(f"[Craftsman ONNX] Running 15-Step Autoregressive Loop...")
     
-    match = (official_code_val == onnx_code)
+    generated_codes = []
+    generated_embeddings = [] # 用于 Sum
+    
+    # 添加 last_id_hidden 到 Sum 列表 (对应 Group 0)
+    generated_embeddings.append(last_id_embed)
+    
+    # 初始 Input
+    current_input_embeds = np.concatenate([gguf_past_hidden, last_id_embed], axis=1) # [1, 2, 2048]
+    
+    for step in range(15):
+        # 1. Run ONNX
+        inputs = {'inputs_embeds': current_input_embeds}
+        inputs.update(current_pasts)
+        
+        outputs = sess.run(None, inputs)
+        onnx_hidden = outputs[0] # [1, 1, 2048]
+        pasts_out = outputs[1:]
+        
+        # Update Pasts
+        for i in range(5):
+            current_pasts[f"past_{i*2}"] = pasts_out[i*2]
+            current_pasts[f"past_{i*2+1}"] = pasts_out[i*2+1]
+            
+        # 2. Predict Code
+        # predictor_heads[step] 对应 prediction of Group (step+1)
+        head_weight = predictor_heads[step] 
+        logits = onnx_hidden[0, -1] @ head_weight.T
+        code = np.argmax(logits)
+        generated_codes.append(code)
+        
+        # 3. Look up Embedding for NEXT step Input
+        # Code Group (step+1) produced 'code'.
+        # We need Embedding Table for Group (step+1) -> codec_embedding_{step+1}.npy
+        # Wait, from my analysis of export script:
+        # get_input_embeddings()[0] -> Group 1 -> codec_embedding_1.npy
+        # So step 0 (predicts Group 1) uses codec_embedding_1.
+        
+        embed_tbl = embedding_tables[step + 1]
+        code_embed = embed_tbl[code].reshape(1, 1, 2048)
+        
+        # 4. Accumulate for Sum
+        generated_embeddings.append(code_embed)
+        
+        # 5. Prepare Input for Next Step
+        # Next step input is just the code embedding of the current prediction
+        current_input_embeds = code_embed
+
+    print(f"  Generated Codes: {generated_codes}")
+    print(f"  Official Codes (Preds): {official_final_codes[0, 1:]}")
+    
+    match_codes = np.array_equal(generated_codes, official_final_codes[0, 1:])
+    print(f"  { '✅' if match_codes else '❌' } Codes Match")
+
+    # 6. Verify Summation (Input to Master Backbone)
+    print(f"[Assembly] Verifying Inputs for Next Master Step...")
+    # Sum all 16 embeddings (Last ID + 15 Generated)
+    summed_embeds = np.sum(generated_embeddings, axis=0) # [1, 1, 2048]
+    
+    # Load Official Backbone Input
+    try:
+        official_backbone_input = np.load(os.path.join(CAPTURED_DIR, "master_step_0_backbone_input.npy"))
+    except FileNotFoundError:
+        print("❌ Missing master_step_0_backbone_input.npy")
+        return
+
+    diff_sum = np.mean(np.abs(summed_embeds - official_backbone_input))
+    cos_sum = np.dot(summed_embeds.flatten(), official_backbone_input.flatten()) / (
+        np.linalg.norm(summed_embeds) * np.linalg.norm(official_backbone_input)
+    )
+    
+    print(f"  Summed Embeds vs Official Backbone Input")
+    pass_mark_sum = "✅" if diff_sum < 1e-3 and cos_sum > 0.999 else "⚠️"
+    print(f"  {pass_mark_sum} MAE: {diff_sum:.6f}, CosSim: {cos_sum:.6f}")
+
+    if match_codes and cos_sum > 0.999:
+        print("\n结论: GGUF 大师 + ONNX 工匠 全链路自回归组装测试通过！")
+    else:
+        print("\n结论: 组装测试未完全通过。")
     
     if match and diff_master < 0.1: # Relaxed GGUF check due to BF16 diff
         print("\n结论: GGUF 大师 + ONNX 工匠 组装测试通过！")
