@@ -68,8 +68,7 @@ def extract_master_weights():
             # 大师 backbone 权重: talker.model.*
             if key.startswith("talker.model."):
                 # 移除前缀,变成无前缀的格式
-                # new_key = key.replace("talker.model.", "")
-                new_key = key
+                new_key = key.replace("talker.model.", "")
                 tensor = f.get_tensor(key)
 
                 # 特殊处理：只提取 codec_embedding (纯音频方案)
