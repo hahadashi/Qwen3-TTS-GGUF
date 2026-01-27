@@ -13,7 +13,7 @@ def main():
     # 1. 配置路径
     MODEL_DIR = r'./Qwen3-TTS-12Hz-1.7B-CustomVoice'
     OUTPUT_DIR = r'./model'
-    ONNX_PATH = os.path.join(OUTPUT_DIR, 'Qwen3-Codec-Decoder.onnx')
+    ONNX_PATH = os.path.join(OUTPUT_DIR, 'qwen3_tts_decoder.onnx')
     
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     

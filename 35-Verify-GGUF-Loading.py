@@ -93,9 +93,9 @@ def run_inference(ctx, inputs_embeds, vocab_size, expected_token_id):
 
 def main():
     # 定义文件名常量
-    FILE_GGUF   = os.path.join("model", "qwen3_tts_codec_only.gguf")
-    FILE_EMBDS  = "40-saved-input-embds.npy"
-    FILE_LOGITS = "40-saved-input-logits.npy"
+    FILE_GGUF   = os.path.join("model", "qwen3_tts_talker.gguf")
+    FILE_EMBDS  = "20-saved-input-embds.npy"
+    FILE_LOGITS = "20-saved-input-logits.npy"
 
     path_gguf   = os.path.join(PROJECT_ROOT, FILE_GGUF)
     path_embds  = os.path.join(PROJECT_ROOT, FILE_EMBDS)

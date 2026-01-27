@@ -57,8 +57,8 @@ def verify_standard_loading():
 
     # 准备测试数据
     print("\n正在加载测试数据...")
-    inputs_embeds = torch.from_numpy(np.load("40-saved-input-embds.npy")).to(device).to(torch.bfloat16)
-    expected_logits = torch.from_numpy(np.load("40-saved-input-logits.npy")).to(device).to(torch.float32)
+    inputs_embeds = torch.from_numpy(np.load("20-saved-input-embds.npy")).to(device).to(torch.bfloat16)
+    expected_logits = torch.from_numpy(np.load("20-saved-input-logits.npy")).to(device).to(torch.float32)
 
     print(f"输入形状: {inputs_embeds.shape}")
 

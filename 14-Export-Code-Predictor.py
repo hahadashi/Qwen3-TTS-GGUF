@@ -20,7 +20,7 @@ except ImportError as e:
 # Configuration
 MODEL_PATH = PROJECT_ROOT / "Qwen3-TTS-12Hz-1.7B-CustomVoice"
 OUTPUT_DIR = PROJECT_ROOT / "model"
-ONNX_PATH = OUTPUT_DIR / "Qwen3-Code-Predictor.onnx"
+ONNX_PATH = OUTPUT_DIR / "qwen3_tts_predictor.onnx"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # [Patch] Force bypass Cache type check
@@ -101,7 +101,7 @@ def export_code_predictor():
     
     print("[2/4] Saving Heads...")
     heads_weights = [head.weight.detach().numpy() for head in predictor.lm_head]
-    np.save(OUTPUT_DIR / "code_predictor_heads.npy", np.stack(heads_weights))
+    np.save(OUTPUT_DIR / "qwen3_tts_predictor_heads.npy", np.stack(heads_weights))
     
     print("[3/4] Preparing Wrapper...")
     wrapper = CodePredictorOnnxWrapper(predictor).eval()

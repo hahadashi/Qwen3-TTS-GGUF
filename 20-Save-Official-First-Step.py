@@ -67,9 +67,9 @@ def main():
         **deterministic_kwargs
     )
 
-    name_embds  = '40-saved-input-embds.npy'
-    name_logits = '40-saved-input-logits.npy'
-    name_code0  = '40-saved-output-code0.npy'
+    name_embds  = '20-saved-input-embds.npy'
+    name_logits = '20-saved-input-logits.npy'
+    name_code0  = '20-saved-output-code0.npy'
     
     # --- 保存数据 ---
     if 'inputs_embeds' in captured_data and 'logits' in captured_data:

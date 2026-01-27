@@ -1,5 +1,4 @@
 """
-83.1-Create-Zero-Tokenizer.py
 从零构造适配 3072 词表的迷你 Tokenizer。
 完全不依赖外部模型文件，直接在脚本内生成所有配置。
 """

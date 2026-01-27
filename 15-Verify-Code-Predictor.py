@@ -19,8 +19,8 @@ except ImportError as e:
 
 # Configuration
 MODEL_PATH = PROJECT_ROOT / "Qwen3-TTS-12Hz-1.7B-CustomVoice"
-ONNX_PATH = PROJECT_ROOT / "model" / "Qwen3-Code-Predictor.onnx"
-HEADS_PATH = PROJECT_ROOT / "model" / "code_predictor_heads.npy"
+ONNX_PATH = PROJECT_ROOT / "model" / "qwen3_tts_predictor.onnx"
+HEADS_PATH = PROJECT_ROOT / "model" / "qwen3_tts_predictor_heads.npy"
 
 def softmax(x, axis=-1):
     e_x = np.exp(x - np.max(x, axis=axis, keepdims=True))

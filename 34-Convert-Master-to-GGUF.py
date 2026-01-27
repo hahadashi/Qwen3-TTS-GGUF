@@ -74,61 +74,56 @@ def patched_load_hparams(dir_model: Path, is_mistral_format: bool):
 # 4. 转换主逻辑
 def main():
     MASTER_MODEL_DIR = os.path.join(PROJECT_ROOT, "model", "hf")
-    GGUF_OUT = os.path.join(PROJECT_ROOT, "model", "qwen3_tts_codec_only.gguf")
-    TEMP_DIR = os.path.join(PROJECT_ROOT, "model", "temp_hf")
+    GGUF_OUT = os.path.join(PROJECT_ROOT, "model", "qwen3_tts_talker.gguf")
 
-    print(f"--- 正在执行 GGUF 转换 (零污染流程) ---")
+    print(f"--- 正在执行 GGUF 转换 (零污染、零拷贝流程) ---")
     print(f"源目录: {MASTER_MODEL_DIR}")
     print(f"输出文件: {GGUF_OUT}")
 
-    # [步骤 A] 准备临时转换目录 (为了给 Key 增加 'model.' 前缀)
-    # GGUF 转换器在 qwen2 模式下期望 backbone 带有 model. 前缀
-    if os.path.exists(TEMP_DIR):
-        shutil.rmtree(TEMP_DIR)
-    os.makedirs(TEMP_DIR)
-    
-    print("[1/3] 正在准备临时转换权重 (添加 model. 前缀)...")
-    from safetensors import safe_open
-    from safetensors.torch import save_file
-    
-    src_weights = os.path.join(MASTER_MODEL_DIR, "model.safetensors")
-    processed_weights = {}
-    
-    with safe_open(src_weights, framework="pt", device="cpu") as f:
-        for key in f.keys():
-            tensor = f.get_tensor(key)
-            # lm_head 不需要前缀
-            if key.startswith("lm_head"):
-                processed_weights[key] = tensor
-            else:
-                # 给骨干网络加上 model. 前缀
-                new_key = key if key.startswith("model.") else f"model.{key}"
-                processed_weights[new_key] = tensor
-                
-    save_file(processed_weights, os.path.join(TEMP_DIR, "model.safetensors"))
-    
-    # 拷贝必要的配置文件
-    for f in ["config.json", "vocab.json", "merges.txt", "tokenizer_config.json", "tokenizer.json"]:
-        src = os.path.join(MASTER_MODEL_DIR, f)
-        if os.path.exists(src):
-            shutil.copy(src, TEMP_DIR)
+    # [步骤 A] 检查必要文件
+    required_files = ["model.safetensors", "config.json", "tokenizer.json"]
+    for f in required_files:
+        if not os.path.exists(os.path.join(MASTER_MODEL_DIR, f)):
+            print(f"❌ 错误: 缺少必要文件 {f}，请制作模型后再运行。")
+            sys.exit(1)
 
     # [步骤 B] 应用 Monkey Patch
-    print("[2/3] 正在向 convert_hf_to_gguf.TextModel 和 ModelBase 应用补丁...")
+    print("[1/2] 正在应用虚拟加载补丁 (动态映射权重键)...")
     
-    # Patch TextModel 类
+    # Patch 1: TextModel.get_vocab_base_pre (绕过分词器哈希检查)
     TextModel.get_vocab_base_pre = patched_get_vocab_base_pre
-    # Patch ModelBase 类
+    
+    # Patch 2: ModelBase.load_hparams (支持从 config.json 加载参数)
     from convert_hf_to_gguf import ModelBase
     ModelBase.load_hparams = staticmethod(patched_load_hparams)
     
+    # Patch 3: ModelBase.index_tensors (核心：虚拟映射权重键)
+    # GGUF 转换器探测到 qwen2 架构时，要求 backbone 权重带 model. 前缀
+    # 我们在读取时动态加上前缀，从而避免在磁盘上复制和重命名文件
+    original_index_tensors = ModelBase.index_tensors
+
+    def patched_index_tensors(self, *args, **kwargs):
+        # 调用原始索引逻辑获取所有 Tensor 生成器
+        tensors = original_index_tensors(self, *args, **kwargs)
+        new_tensors = {}
+        for name, data_gen in tensors.items():
+            # lm_head 不需要前缀；model. 开头的说明已经有前缀了
+            if name.startswith("lm_head") or name.startswith("model."):
+                new_tensors[name] = data_gen
+            else:
+                # 给骨干网络动态加上 model. 前缀 (如 layers.0... -> model.layers.0...)
+                new_tensors[f"model.{name}"] = data_gen
+        return new_tensors
+
+    ModelBase.index_tensors = patched_index_tensors
+
     # [步骤 C] 调用转换器主函数
-    print(f"[3/3] 正在执行 convert_hf_to_gguf.main()...")
+    print(f"[2/2] 正在调用 convert_hf_to_gguf.main()...")
     
-    # 模拟命令行参数给 convert_hf_to_gguf
+    # 模拟命令行参数
     sys.argv = [
         "convert_hf_to_gguf.py",
-        TEMP_DIR,
+        MASTER_MODEL_DIR,
         "--outfile", GGUF_OUT,
         "--outtype", "f16"
     ]
@@ -142,10 +137,6 @@ def main():
         import traceback
         traceback.print_exc()
         sys.exit(1)
-    finally:
-        if os.path.exists(TEMP_DIR):
-            print(f"[清理] 正在删除临时目录...")
-            shutil.rmtree(TEMP_DIR)
 
 if __name__ == "__main__":
     main()
