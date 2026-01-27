@@ -30,7 +30,7 @@ def extract_master_weights():
     ORIGINAL_CONFIG = os.path.join(ORIGINAL_MODEL_PATH, "config.json")
 
     # 输出路径
-    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "Standalone-Bare-Master")
+    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "model", "hf")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     OUTPUT_WEIGHTS = os.path.join(OUTPUT_DIR, "model.safetensors")
     OUTPUT_CONFIG = os.path.join(OUTPUT_DIR, "config.json")
@@ -140,9 +140,9 @@ def extract_master_weights():
             "note": "Input/Output are codec token IDs (0-3071)"
         },
         "usage": {
-            "gguf_conversion": "python convert_hf_to_gguf.py Standalone-Bare-Master --outfile master-codec-only.gguf",
-            "load_with": "from bare_master.modeling import Qwen3TTSTalkerModel",
-            "config_class": "from bare_master.configuration import Qwen3TTSTalkerConfig",
+            "gguf_conversion": "python 84-Convert-Master-to-GGUF.py",
+            "load_with": "from qwen_tts.core.models.modeling_qwen3_tts import Qwen3TTSTalkerModel",
+            "config_class": "from qwen_tts.core.models.configuration_qwen3_tts import Qwen3TTSTalkerConfig",
             "llamacpp_compatible": "伪装成 Qwen3-VL，纯音频词表，无文本 tokenizer",
             "inference": "Input codec token IDs directly, output codec token IDs"
         }
@@ -167,7 +167,7 @@ def extract_master_weights():
     print(f"  Reduction: 98% smaller vocab, 98% fewer logits")
     print(f"\n⚠️  Note: No tokenizer files copied (codec-only vocab doesn't need text tokenizer)")
     print(f"Ready for GGUF conversion!")
-    print(f"Run: python convert_hf_to_gguf.py {OUTPUT_DIR} --outfile master-codec-only.gguf")
+    print(f"Run: python 84-Convert-Master-to-GGUF.py")
 
 if __name__ == "__main__":
     extract_master_weights()

@@ -39,9 +39,9 @@ def patched_get_vocab_base_pre(self, tokenizer) -> str:
 
 # 4. 转换主逻辑
 def main():
-    MASTER_MODEL_DIR = os.path.join(PROJECT_ROOT, "Standalone-Bare-Master")
-    GGUF_OUT = os.path.join(PROJECT_ROOT, "master-codec-only-3072-f16.gguf")
-    TEMP_DIR = os.path.join(PROJECT_ROOT, "83_temp_hf_format")
+    MASTER_MODEL_DIR = os.path.join(PROJECT_ROOT, "model", "hf")
+    GGUF_OUT = os.path.join(PROJECT_ROOT, "model", "qwen3_tts_codec_only.gguf")
+    TEMP_DIR = os.path.join(PROJECT_ROOT, "model", "temp_hf")
 
     # [步骤 A] 准备临时权重 (转置 lm_head 并统一命名)
     # 这部分逻辑从之前的脚本继承，因为 python 调用 main() 也会读取磁盘文件

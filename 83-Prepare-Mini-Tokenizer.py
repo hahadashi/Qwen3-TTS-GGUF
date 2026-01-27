@@ -11,7 +11,7 @@ import shutil
 def prepare_mini_tokenizer():
     PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
     SOURCE_MODEL_DIR = os.path.join(PROJECT_ROOT, "Qwen3-TTS-12Hz-1.7B-CustomVoice")
-    TARGET_DIR = os.path.join(PROJECT_ROOT, "Standalone-Bare-Master")
+    TARGET_DIR = os.path.join(PROJECT_ROOT, "model", "hf")
     
     print(f"--- Preparing Mini Tokenizer (3072 Vocab) ---")
     print(f"Source: {SOURCE_MODEL_DIR}")

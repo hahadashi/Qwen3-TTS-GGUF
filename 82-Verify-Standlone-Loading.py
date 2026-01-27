@@ -24,7 +24,7 @@ def verify_standard_loading():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # 使用提取出来的大师模型路径
-    MODEL_PATH = os.path.abspath("Standalone-Bare-Master")
+    MODEL_PATH = os.path.join(PROJECT_ROOT, "model", "hf")
 
     print(f"--- Verifying Standard Model Loading (Codec-Only Vocab) ---")
     print(f"Model path: {MODEL_PATH}")
@@ -56,8 +56,8 @@ def verify_standard_loading():
 
     # 准备测试数据
     print("\nLoading test data...")
-    inputs_embeds = torch.from_numpy(np.load("40_first_step_embeds.npy")).to(device).to(torch.bfloat16)
-    expected_logits = torch.from_numpy(np.load("40_first_step_logits.npy")).to(device).to(torch.float32)
+    inputs_embeds = torch.from_numpy(np.load("40-saved-input-embds.npy")).to(device).to(torch.bfloat16)
+    expected_logits = torch.from_numpy(np.load("40-saved-input-logits.npy")).to(device).to(torch.float32)
 
     print(f"Input shape: {inputs_embeds.shape}")
 

@@ -93,7 +93,7 @@ def run_inference(ctx, inputs_embeds, vocab_size, expected_token_id):
 
 def main():
     # 定义文件名常量
-    FILE_GGUF   = "master-codec-only-3072-f16.gguf"
+    FILE_GGUF   = os.path.join("model", "qwen3_tts_codec_only.gguf")
     FILE_EMBDS  = "40-saved-input-embds.npy"
     FILE_LOGITS = "40-saved-input-logits.npy"
 
