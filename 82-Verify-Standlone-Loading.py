@@ -17,9 +17,8 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# 使用独立的大师定义
-from bare_master.configuration import Qwen3TTSTalkerConfig
-from bare_master.modeling import Qwen3TTSTalkerModel
+from qwen_tts.core.models.configuration_qwen3_tts import Qwen3TTSTalkerConfig
+from qwen_tts.core.models.modeling_qwen3_tts import Qwen3TTSTalkerModel
 
 def verify_standard_loading():
     device = "cuda" if torch.cuda.is_available() else "cpu"
