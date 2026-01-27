@@ -46,6 +46,22 @@ def talker_forward_pre_hook(module, args, kwargs):
         print(f"[CAPTURE] Master Step {state.master_step} Entry Hooked.")
         if input_ids is not None:
             np.save(os.path.join(SAVE_DIR, "master_step_0_input_ids.npy"), input_ids.cpu().numpy())
+            
+        trailing_text = kwargs.get('trailing_text_hidden')
+        if trailing_text is not None:
+            np.save(os.path.join(SAVE_DIR, "trailing_text_hidden.npy"), trailing_text.detach().cpu().to(torch.float32).numpy())
+            
+        tts_pad = kwargs.get('tts_pad_embed')
+        if tts_pad is not None:
+            np.save(os.path.join(SAVE_DIR, "tts_pad_embed.npy"), tts_pad.detach().cpu().to(torch.float32).numpy())
+            
+        gen_step = kwargs.get('generation_step')
+        if gen_step is not None:
+             # gen_step might be a tensor or int
+            if torch.is_tensor(gen_step):
+                np.save(os.path.join(SAVE_DIR, "generation_step.npy"), gen_step.detach().cpu().numpy())
+            else:
+                np.save(os.path.join(SAVE_DIR, "generation_step.npy"), np.array([gen_step]))
         if past_hidden is not None:
             np.save(os.path.join(SAVE_DIR, "master_step_0_past_hidden.npy"), past_hidden.detach().cpu().to(torch.float32).numpy())
     return None
