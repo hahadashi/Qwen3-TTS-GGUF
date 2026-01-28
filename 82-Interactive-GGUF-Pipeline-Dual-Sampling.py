@@ -16,7 +16,35 @@ from qwen3_tts_gguf import logger
 class Qwen3TTS:
     """
     交互式 Qwen3-TTS GGUF 合成引擎 (双模型独立采样版)
+    
+    Codec 码表 ID 分布 (Verified from official config.json):
+    | 区域     | 数量 | ID 范围         | 关键内容                        |
+    | :---     | :--- | :---           | :---                            |
+    | 声音特征 | 2048 | 0 - 2047       | 基础音频特征 (V2 码表)          |
+    | 语言标签 | ~100 | 2048 - 2147    | 中(2055)英(2050)日(2058)韩(2064)|
+    | 协议标签 | 10   | 2148 - 2157    | PAD(2148) EOS(2150) Think(2154) |
+    | 预留扩展 | ~700 | 2158 - 2860    | 留作未来适配                    |
+    | 音色 ID  | ~200 | 2861 - 3071    | Vivian(3065) UncleFu(3010)      |
     """
+    
+    # 官方推荐常量映射
+    SPEAKER_MAP = {
+        "vivian": 3065, "serena": 3066, "uncle_fu": 3010, "ryan": 3061,
+        "aiden": 2861, "ono_anna": 2873, "sohee": 2864, "eric": 2875, "dylan": 2878
+    }
+    
+    LANGUAGE_MAP = {
+        "chinese": 2055, "english": 2050, "japanese": 2058, "korean": 2064,
+        "german": 2053, "spanish": 2054, "french": 2061, "russian": 2069,
+        "beijing_dialect": 2074, "sichuan_dialect": 2062, "auto": 2055 # 默认跟随中文
+    }
+
+    # 官方流程协议标签
+    PROTOCOL = {
+        "PAD": 2148, "BOS": 2149, "EOS": 2150, "BOS_TOKEN": 151672, "EOS_TOKEN": 151673,
+        "THINK": 2154, "NOTHINK": 2155, "THINK_BOS": 2156, "THINK_EOS": 2157
+    }
+
     def __init__(self, model_root="model", tokenizer_path="Qwen3-TTS-12Hz-1.7B-CustomVoice"):
         self.project_root = os.getcwd()
         self.model_dir = os.path.join(self.project_root, model_root)
@@ -123,7 +151,7 @@ class Qwen3TTS:
         # 5. Random Choice
         return np.random.choice(len(probs), p=probs)
 
-    def synthesize(self, text, speaker_id=3065, max_steps=250, verbose=False, 
+    def synthesize(self, text, speaker_id="vivian", language="chinese", max_steps=250, verbose=False, 
                    # Master Params
                    do_sample=True, temperature=0.9, top_p=1.0, top_k=50,
                    # Craftsman Params (Subtalker)
@@ -134,14 +162,18 @@ class Qwen3TTS:
                    play=False):
         """
         全动态合成入口 (双模型独立采样)
-        默认参数对齐官方 generate_config.json
+        speaker_id: 支持 ID (如 3065) 或 名称 (如 "vivian")
+        language: 支持 "chinese", "english" 等
         """
-        if verbose: print(f"\n[Synthesizer] 目标文本: {text}")
+        if verbose: print(f"\n[Synthesizer] 目标文本: {text} | 说话人: {speaker_id} | 语言: {language}")
         start_time = time.time()
+        
+        # 0. 映射参数
+        real_spk_id = self.SPEAKER_MAP.get(speaker_id.lower(), speaker_id) if isinstance(speaker_id, str) else speaker_id
         
         # 1. 编译 Prompt
         p_start = time.time()
-        prompt_embeds = self._construct_prompt(text, speaker_id)
+        prompt_embeds = self._construct_prompt(text, real_spk_id, language)
         p_time = time.time() - p_start
         
         # 2. 推理
@@ -195,12 +227,25 @@ class Qwen3TTS:
 
     # --- 内部组件 ---
 
-    def _construct_prompt(self, text, spk_id):
+    def _construct_prompt(self, text, spk_id, lang="chinese"):
         ids = self.tokenizer.encode(text, add_special_tokens=False)
-        seq = [ (151644, 0), (77091, 0), (198, 0), (151671, 2154), (151671, 2156), (151671, 2055), (151671, 2157), (151671, spk_id), (151672, 2148) ]
-        for tid in ids: seq.append((tid, 2148))
-        seq.append((151673, 2148))
-        seq.append((151671, 2149)) # Codec BOS
+        lang_id = self.LANGUAGE_MAP.get(lang.lower(), 2055)
+        
+        # 官方构造逻辑: IM_START -> SYSTEM -> [CODEC_THINK -> CODEC_THINK_BOS -> LANG -> CODEC_THINK_EOS -> SPK] -> BOS
+        # 注意: 151671 是文本侧的 PAD，通常作为背景载体叠加 Codec IDs
+        p = self.PROTOCOL
+        seq = [ 
+            (151644, 0), (77091, 0), (198, 0), # Header
+            (151671, p["THINK"]), 
+            (151671, p["THINK_BOS"]), 
+            (151671, lang_id), 
+            (151671, p["THINK_EOS"]), 
+            (151671, spk_id), 
+            (p["BOS_TOKEN"], p["PAD"]) 
+        ]
+        for tid in ids: seq.append((tid, p["PAD"]))
+        seq.append((p["EOS_TOKEN"], p["PAD"]))
+        seq.append((151671, 2149)) # Codec BOS (Start Generation)
         
         embeds = []
         for tid, cid in seq:
@@ -318,12 +363,12 @@ class Qwen3TTS:
 
 if __name__ == "__main__":
     tts = Qwen3TTS()
-    TARGET_TEXT = "你好，我是具有随机性的千问3-TTS。如果不信，你可以多让我说几次同样的话。"
-    SPEAKER_ID = 3065
-    MAX_STEPS = 400
+    TARGET_TEXT = "你好，我是具有随机性的千问3-TTS。这是我的终极进化形态。"
+    SPEAKER = "vivian"
+    LANGUAGE = "chinese"
     
-    wav = tts.synthesize(TARGET_TEXT, speaker_id=SPEAKER_ID, max_steps=MAX_STEPS, verbose=True, 
-                         temperature=1, subtalker_temperature=0.1, play=True)
+    wav = tts.synthesize(TARGET_TEXT, speaker_id=SPEAKER, language=LANGUAGE, max_steps=400, verbose=True, 
+                         temperature=0.9, subtalker_temperature=0.9, play=True)
     sf.write("output/dual_sample_default.wav", wav, 24000)
 
     print("\n✅ 双参数采样实验完成。请检查 output 目录。")
