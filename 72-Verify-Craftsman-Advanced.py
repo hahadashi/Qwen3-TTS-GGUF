@@ -104,14 +104,16 @@ def run_full_verification():
         compare_vectors(off_hidden_last, gguf_hidden_last, f"S{i} Hidden")
 
         # 4. 验证 Token ID 对齐 (LM Head & Shift 逻辑)
-        # 获取 Logits [30720]
+        # 获取 Logits [n_tokens, 30720]
         logits_ptr = nano_llama.llama_get_logits(ctx)
-        gguf_logits = np.ctypeslib.as_array(logits_ptr, shape=(n_vocab,)).copy()
+        all_logits = np.ctypeslib.as_array(logits_ptr, shape=(n_tokens, n_vocab)).copy()
+        # 取最后一个 token 的预测分布
+        gguf_logits_last = all_logits[-1]
         
         # 应用 Shift: 提取当前步对应的 2048 维度区域
         shift_start = i * 2048
         shift_end = (i + 1) * 2048
-        step_logits = gguf_logits[shift_start : shift_end]
+        step_logits = gguf_logits_last[shift_start : shift_end]
         
         gguf_id = np.argmax(step_logits)
         
