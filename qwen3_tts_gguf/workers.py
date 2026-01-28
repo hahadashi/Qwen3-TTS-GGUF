@@ -16,6 +16,7 @@ def wav_writer_proc(record_queue, filename, sample_rate=24000):
         while True:
             chunk = record_queue.get()
             if chunk is None: break
+            if isinstance(chunk, str) and chunk == "CLEAR": continue
             f.write(chunk.flatten().astype(np.float32))
             f.flush()
     except: pass
@@ -23,8 +24,7 @@ def wav_writer_proc(record_queue, filename, sample_rate=24000):
 
 def decoder_worker_proc(codes_queue, pcm_queue, mouth_onnx_path, record_queue=None):
     """
-    解码工人：极致精简位对齐方案。
-    由于 LEFT_CONTEXT=72 已经让模型达到了相位稳定性，不再需要昂贵的 NCC 匹配。
+    解码工人：支持 CLEAR 信号，实现多段推理的上下文重置。
     """
     import onnxruntime as ort
     
@@ -33,6 +33,8 @@ def decoder_worker_proc(codes_queue, pcm_queue, mouth_onnx_path, record_queue=No
     UPSAMPLE_RATE = 1920 
 
     sess = ort.InferenceSession(mouth_onnx_path, providers=['CPUExecutionProvider'])
+    
+    # 状态初始化
     history_codes = np.zeros((0, 16), dtype=np.int64)
     
     try:
@@ -43,9 +45,18 @@ def decoder_worker_proc(codes_queue, pcm_queue, mouth_onnx_path, record_queue=No
                 if record_queue: record_queue.put(None)
                 break
             
+            # 处理重置信号
+            if isinstance(task, str) and task == "CLEAR":
+                history_codes = np.zeros((0, 16), dtype=np.int64)
+                # 信号透传，确保下游 speaker 也能感知（如果以后需要扩容的话）
+                # 这里暂不透传给 speaker，因为直接切割 PCM 会带来爆音，
+                # 我们希望 Speaker 继续播完 buffer。
+                if record_queue: record_queue.put("CLEAR")
+                continue
+            
             working_codes = np.array(task).astype(np.int64)
             
-            # 1. 全量解码：此时输出在数学上是分片连贯的
+            # 1. 全量解码
             c_in = working_codes[np.newaxis, ...].astype(np.int64)
             full_audio = sess.run(None, {'audio_codes': c_in})[0].squeeze().astype(np.float32)
             
@@ -56,14 +67,14 @@ def decoder_worker_proc(codes_queue, pcm_queue, mouth_onnx_path, record_queue=No
             current_chunk_steps = len(working_codes) - actual_history_steps - RIGHT_CONTEXT
             n_samples = current_chunk_steps * UPSAMPLE_RATE
             
-            # 3. 直接切割：因为有足够的上下文，切割点在物理上已经是连续的
+            # 3. 直接切割
             output_chunk = full_audio[start_idx : start_idx + n_samples]
 
             # 4. 交付
             pcm_queue.put(output_chunk.copy())
             if record_queue: record_queue.put(output_chunk.copy())
             
-            # 5. 更新状态用于下一次拼接
+            # 5. 更新状态
             history_codes = working_codes[:actual_history_steps + current_chunk_steps][-LEFT_CONTEXT:]
 
     except Exception as e:
@@ -78,6 +89,8 @@ def speaker_worker_proc(pcm_queue, sample_rate=24000):
             try:
                 new_item = pcm_queue.get_nowait()
                 if new_item is None: break
+                # 注意：Speaker 不处理 CLEAR，它只需顺序播放。
+                # 它播完上一段的剩下的 PCM，自然会接着播下一段。
                 state["current_data"] = np.concatenate([state["current_data"], new_item.reshape(-1, 1).astype(np.float32)], axis=0)
             except queue.Empty: break
         if not state["started"]:

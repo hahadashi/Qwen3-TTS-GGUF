@@ -91,6 +91,7 @@ class Qwen3TTSDoubleStreamEngine:
         return np.random.choice(len(probs), p=probs)
 
     def synthesize(self, text, speaker_id=3066, language=2055, chunk_size=100, verbose=True):
+        self.codes_q.put("CLEAR")
         if isinstance(language, str): language = self.LANGUAGE_MAP.get(language.lower(), 2055)
         if isinstance(speaker_id, str): speaker_id = self.SPEAKER_MAP.get(speaker_id.lower(), 3066)
 

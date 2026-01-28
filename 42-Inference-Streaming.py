@@ -11,6 +11,9 @@ if __name__ == "__main__":
     
     text = "您好，欢迎体验千问3-TTS流式推理。这不仅是在测试模型，更是在测试生产级别的异步消费架构。"
     engine.synthesize(text, speaker_id="vivian", chunk_size=50)
+
+    text = "观众老爷们觉得怎么样呢？"
+    engine.synthesize(text, speaker_id="vivian", chunk_size=50)
     
     print("🎵 正在播放，请等待...")
     time.sleep(15)
