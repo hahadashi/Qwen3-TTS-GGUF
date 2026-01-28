@@ -65,7 +65,7 @@ def main():
                 'input_values': {0: 'batch_size', 1: 'sequence_length'},
                 'audio_codes': {0: 'batch_size', 1: 'sequence_length'}
             },
-            opset_version=14, 
+            opset_version=18,  # 使用 opset 18，避免版本转换失败
             do_constant_folding=True
         )
         logger.info("✅ Encoder ONNX 导出成功！")
