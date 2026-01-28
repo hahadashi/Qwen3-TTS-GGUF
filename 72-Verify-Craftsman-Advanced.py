@@ -48,6 +48,12 @@ def run_full_verification():
     
     print(f"模型参数: n_embd={n_embd}, n_vocab={n_vocab}")
 
+    # 获取全量 Embedding 权重 (用于构造输入校验)
+    print("正在从 GGUF 提取 Token Embedding 权重用于输入对齐检查...")
+    all_embd_weights = nano_llama.get_token_embeddings_gguf(MODEL_PATH)
+    
+    prev_gguf_id = None
+
     # 循环验证 15 步
     for i in range(15):
         print(f"\n>>> Step {i} 验证 <<<")
@@ -63,6 +69,15 @@ def run_full_verification():
         flat_input = proj_input.reshape(-1, n_embd)
         n_tokens = flat_input.shape[0]
         
+        # --- 新增：输入校验逻辑 ---
+        if i > 0 and prev_gguf_id is not None:
+            # 构造输入：取前一帧 ID 在当前 Table i 对应的 Embedding
+            gguf_input_idx = int(prev_gguf_id + i * 2048)
+            constructed_input = all_embd_weights[gguf_input_idx]
+            # 官方当前步输入（取第一帧，即当前步新输入的 token）
+            official_input_this_step = flat_input[0]
+            compare_vectors(official_input_this_step, constructed_input, f"S{i} Input Emb")
+
         # 2. 构造 Batch 并推理
         batch = nano_llama.llama_batch_init(n_tokens, n_embd, 1)
         batch.n_tokens = n_tokens
@@ -72,17 +87,12 @@ def run_full_verification():
         ctypes.memmove(batch.embd, embd_data.ctypes.data, embd_data.nbytes)
         
         # 计算当前位置 (KV Cache 累积)
-        # Step 0 输入 2 个 token, pos 为 [0, 1]
-        # Step 1 输入 1 个 token, pos 为 [2]
-        # 公式: Step i 的起始 pos = prev_total_tokens
-        # 由于 Step 0 有 2 个 token，所以起始 pos 如下
         start_pos = 0 if i == 0 else (i + 1)
         
         for t in range(n_tokens):
             batch.pos[t] = start_pos + t
             batch.n_seq_id[t] = 1
             batch.seq_id[t][0] = 0
-            # 标记是否需要 Logits 和 Embeddings (通常只需要最后一帧)
             batch.logits[t] = 1 if t == n_tokens - 1 else 0
             
         ret = nano_llama.llama_decode(ctx, batch)
@@ -98,7 +108,6 @@ def run_full_verification():
         
         official_hidden_path = os.path.join(CAPTURED_DIR, f"step_{i}_output_hidden.npy")
         official_hidden = np.load(official_hidden_path).astype(np.float32)
-        # 官方输出取最后一帧
         off_hidden_last = official_hidden.flatten().reshape(-1, n_embd)[-1]
         
         compare_vectors(off_hidden_last, gguf_hidden_last, f"S{i} Hidden")
@@ -116,6 +125,7 @@ def run_full_verification():
         step_logits = gguf_logits_last[shift_start : shift_end]
         
         gguf_id = np.argmax(step_logits)
+        prev_gguf_id = gguf_id # 记录本次预测 ID 用于下一波输入校验
         
         # 加载官方选中的 ID
         official_id_path = os.path.join(CAPTURED_DIR, f"step_{i}_output_ids.npy")
@@ -126,7 +136,7 @@ def run_full_verification():
         else:
             print(f"  ❌ [S{i} Token ID] Mismatch! GGUF: {gguf_id}, Official: {official_id}")
             # 辅助排查：检查 official_id 在 GGUF Logits 中的位置
-            full_gguf_id = np.argmax(gguf_logits)
+            full_gguf_id = np.argmax(gguf_logits_last)
             print(f"     DEBUG: Full GGUF Argmax: {full_gguf_id} (Relative: {full_gguf_id % 2048}, Table: {full_gguf_id // 2048})")
 
         # 清理 Batch
