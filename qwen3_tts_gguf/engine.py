@@ -90,7 +90,7 @@ class Qwen3TTSDoubleStreamEngine:
         probs /= probs.sum()
         return np.random.choice(len(probs), p=probs)
 
-    def synthesize(self, text, speaker_id=3066, language=2055, chunk_size=12, verbose=True):
+    def synthesize(self, text, speaker_id=3066, language=2055, chunk_size=100, verbose=True):
         if isinstance(language, str): language = self.LANGUAGE_MAP.get(language.lower(), 2055)
         if isinstance(speaker_id, str): speaker_id = self.SPEAKER_MAP.get(speaker_id.lower(), 3066)
 
@@ -115,13 +115,17 @@ class Qwen3TTSDoubleStreamEngine:
         m_hidden = np.ctypeslib.as_array(llama.llama_get_embeddings(self.m_ctx), shape=(len(seq), 2048))[-1].copy()
         m_logits = np.ctypeslib.as_array(llama.llama_get_logits(self.m_ctx), shape=(len(seq), 3072))[-1].copy()
         
-        cur_pos, step_buffer = len(seq), []
+        cur_pos = len(seq)
+        all_generated_codes = []
+        last_pushed_idx = 0
+        LEFT_CONTEXT = 72
+        RIGHT_CONTEXT = 4
         
-        for step_idx in range(400):
+        for step_idx in range(600): # 调高步数限制
             code_0 = self._sample(m_logits)
             if code_0 == 2150: break
             
-            # Craftsman (略去详细计算，同 44 号逻辑)
+            # Craftsman 计算
             step_codes = [code_0]
             step_emb_2048 = [self.assets["emb_tables"][0][code_0].copy()]
             proj = self.assets["proj"]
@@ -145,13 +149,19 @@ class Qwen3TTSDoubleStreamEngine:
                     llama.llama_decode(self.c_ctx, self.c_batch)
                     last_logits = np.ctypeslib.as_array(llama.llama_get_logits(self.c_ctx), shape=(30720,))
             
-            step_buffer.append(step_codes)
-            if len(step_buffer) >= chunk_size:
-                self.codes_q.put(list(step_buffer))
-                step_buffer = []
-                if verbose: print(f"  └─ 步数 {step_idx+1}: 推送分片")
+            all_generated_codes.append(step_codes)
+            
+            # 检查是否满足推送条件：[历史(自动包含) + Chunk + 未来(4)]
+            # 我们始终在 codes_q 中推送带上下文的一整块
+            if len(all_generated_codes) >= last_pushed_idx + chunk_size + RIGHT_CONTEXT:
+                start = max(0, last_pushed_idx - LEFT_CONTEXT)
+                end = last_pushed_idx + chunk_size + RIGHT_CONTEXT
+                window = all_generated_codes[start:end]
+                self.codes_q.put(list(window))
+                last_pushed_idx += chunk_size
+                if verbose: print(f"  └─ 步数 {step_idx+1}: 推送流式分片 (对齐历史={min(last_pushed_idx-chunk_size, LEFT_CONTEXT)})")
 
-            # Feedback (略)
+            # 反馈给 Master
             summed = np.sum(step_emb_2048, axis=0) + self.assets["tts_pad"].flatten()
             self.m_batch.n_tokens = 1
             ctypes.memmove(self.m_batch.embd, summed.ctypes.data, summed.nbytes)
@@ -161,7 +171,15 @@ class Qwen3TTSDoubleStreamEngine:
             m_hidden = np.ctypeslib.as_array(llama.llama_get_embeddings(self.m_ctx), shape=(1, 2048))[0].copy()
             m_logits = np.ctypeslib.as_array(llama.llama_get_logits(self.m_ctx), shape=(1, 3072))[0].copy()
 
-        if step_buffer: self.codes_q.put(list(step_buffer))
+        # 推送最后的余量
+        if last_pushed_idx < len(all_generated_codes):
+            start = max(0, last_pushed_idx - LEFT_CONTEXT)
+            window = all_generated_codes[start:]
+            # 补齐 4 帧 Padding 以确保末端音质
+            padding = [all_generated_codes[-1]] * RIGHT_CONTEXT
+            self.codes_q.put(window + padding)
+            if verbose: print(f"  └─ 任务完成: 推送末尾余量 (共 {len(all_generated_codes)} 帧)")
+
 
     def shutdown(self):
         try:
