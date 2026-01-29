@@ -3,7 +3,7 @@ import sys
 import torch
 from qwen3_tts_gguf import logger
 from qwen3_tts_gguf.codec_export import CodecExportWrapper
-from qwen_tts.core import Qwen3TTSTokenizerV2Model
+from qwen3_tts_gguf.tokenizer_12hz.modeling_tokenizer import Qwen3TTSTokenizerV2Model
 
 
 # 添加项目根目录到 sys.path
