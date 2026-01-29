@@ -60,12 +60,16 @@ def main():
             *pkv_list
         )
         
-        # 解包返回结果
-        chunk_wav = outputs[0]
-        pre_conv_h = outputs[1]
-        latent_buf = outputs[2]
-        conv_h = outputs[3]
-        pkv_list = outputs[4:]
+        # 解包返回结果 (适配静态输出方案)
+        chunk_wav_full = outputs[0]
+        valid_len = int(outputs[1].item())
+        pre_conv_h = outputs[2]
+        latent_buf = outputs[3]
+        conv_h = outputs[4]
+        pkv_list = outputs[5:]
+        
+        # 根据 valid_len 截取有效部分
+        chunk_wav = chunk_wav_full[:, :valid_len]
         
         if chunk_wav.shape[-1] > 0:
             print(f"  > 步长 {i//chunk_size}: 输出 {chunk_wav.shape[-1]} 采样点")

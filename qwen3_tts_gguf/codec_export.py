@@ -448,15 +448,28 @@ class StatefulCodecONNXWrapper(nn.Module):
             
         wav = curr.squeeze(1).clamp(min=-1, max=1)
         
+        # 6. 静态化切片截取音频
+        # 性能点：避免输出 Shape 依赖于 is_last 的数值。
+        # 这里我们总是从 start_samples 开始切，并总是输出到 wav 的末尾。
+        # 客户端根据返回的 valid_samples 进行二次截断。
         start_samples = conv_history.shape[-1] * self.samples_per_frame
+        
+        # 计算理论上的有效长度 (逻辑计算依然保留，但仅用于返回数值)
         actual_end = torch.min(torch.tensor(float(wav.shape[-1]), device=device), 
                              (start_samples + num_finalize * self.samples_per_frame).float()).long()
-        final_wav = wav[:, start_samples : actual_end]
+        valid_samples = (actual_end - start_samples).view(1) # Shape [1]
         
+        # 导出点：final_wav 的长度现在只取决于 N，而不取决于 is_last 是 0 还是 1
+        # 在流式(is_last=0)下，wav 末尾包含了一些未确定区域，但由于我们将有效长度告知了客户端，
+        # 客户端只会取走前 N 帧对应的音频，确保了数值正确。
+        final_wav = wav[:, start_samples : ]
+        
+        # 7. 更新卷积历史 (始终保留最后 4 帧)
         finalize_hidden = accumulated[:, :, :num_finalize]
         next_conv_hist = finalize_hidden[:, :, -self.CONV_HISTORY_WINDOW:]
         
-        return (final_wav, next_pre_conv_hist, next_latent_buf, next_conv_hist) + \
+        # 8. 重新展平输出 KV Tensor
+        return (final_wav, valid_samples, next_pre_conv_hist, next_latent_buf, next_conv_hist) + \
                tuple(kv_stack.key_cache) + tuple(kv_stack.value_cache)
 
 class SpeakerEncoderExportWrapper(nn.Module):
