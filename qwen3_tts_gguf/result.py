@@ -40,10 +40,19 @@ class LoopOutput:
 @dataclass
 class TTSConfig:
     """推理控制参数封装"""
-    temperature: float = 0.5
-    max_steps: int = 600
+    # 大师控制 (Master/Talker/Talker)
+    do_sample: bool = True
+    temperature: float = 0.8
     top_p: float = 1.0
     top_k: int = 50
+    
+    # 工匠控制 (Craftsman/Predictor/Subtalker)
+    sub_do_sample: bool = False
+    sub_temperature: float = 0.5
+    sub_top_p: float = 1.0
+    sub_top_k: int = 50
+    
+    max_steps: int = 600
 
 @dataclass
 class TTSResult:
@@ -79,14 +88,13 @@ class TTSResult:
 
     # --- IO 能力 ---
 
-    def play(self):
+    def play(self, blocking: bool = True):
         """播放音频结果"""
         if self.audio is None or len(self.audio) == 0:
             logger.warning("⚠️ No audio data available in this result to play.")
             return
         import sounddevice as sd
-        sd.play(self.audio, SAMPLE_RATE)
-        sd.wait()
+        sd.play(self.audio, samplerate=24000, blocking=blocking)
 
     def save_wav(self, path: str):
         """保存为 WAV 文件"""

@@ -68,9 +68,11 @@ class TTSEngine:
         """工厂方法：创建语音流"""
         return TTSStream(self, n_ctx=n_ctx)
 
-    def _do_sample(self, logits, temperature):
+    def _do_sample(self, logits, do_sample=True, temperature=0.5, top_p=1.0, top_k=50):
         """引擎内部采样辅助 (供 Stream 调用)"""
-        return sample(logits, temperature=temperature, top_p=1.0, top_k=50)
+        if not do_sample:
+            return int(np.argmax(logits))
+        return sample(logits, temperature=temperature, top_p=top_p, top_k=top_k)
 
     def shutdown(self):
         """释放资源"""

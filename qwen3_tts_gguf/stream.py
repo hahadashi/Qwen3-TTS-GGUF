@@ -65,7 +65,7 @@ class TTSStream:
         pdata, timing = self._build_prompt_data(text, language, is_clone=True)
 
         # 2. 驱动内核进行生成 (儿子负责统计推理时间)
-        lout = self._run_engine_loop(pdata, timing, cfg.temperature, cfg.max_steps)
+        lout = self._run_engine_loop(pdata, timing, cfg)
 
         # 3. 后处理 (渲染与封装)
         res = self._post_process(text, pdata, lout)
@@ -89,8 +89,7 @@ class TTSStream:
     def _run_engine_loop(self, 
                        pdata: PromptData,
                        timing: Timing,
-                       temperature: float, 
-                       max_steps: int) -> LoopOutput:
+                       cfg: TTSConfig) -> LoopOutput:
         """
         内核层：负责 Master 与 Craftsman 的逐帧推理循环。
         """
@@ -105,8 +104,14 @@ class TTSStream:
         m_hidden, m_logits = self.master.prefill(pdata.embd, seq_id=0)
         timing.prefill_time = time.time() - t_pre_s
         
-        for step_idx in range(max_steps):
-            code_0 = self.engine._do_sample(m_logits, temperature)
+        for step_idx in range(cfg.max_steps):
+            code_0 = self.engine._do_sample(
+                m_logits, 
+                do_sample=cfg.do_sample, 
+                temperature=cfg.temperature,
+                top_p=cfg.top_p,
+                top_k=cfg.top_k
+            )
             if code_0 == PROTOCOL["EOS"]:
                 m_hidden, m_logits = self.master.decode_step(
                     self.assets.emb_tables[0][PROTOCOL["EOS"]].flatten() + self.assets.tts_pad.flatten(),
@@ -116,7 +121,14 @@ class TTSStream:
             
             # 工匠补全
             t_c_s = time.time()
-            step_codes, step_embeds_2048 = self.craftsman.predict_frame(m_hidden, code_0, temperature=temperature)
+            step_codes, step_embeds_2048 = self.craftsman.predict_frame(
+                m_hidden, 
+                code_0, 
+                do_sample=cfg.sub_do_sample,
+                temperature=cfg.sub_temperature,
+                top_p=cfg.sub_top_p,
+                top_k=cfg.sub_top_k
+            )
             timing.craftsman_loop_time += (time.time() - t_c_s)
             
             all_codes.append(step_codes)
@@ -198,7 +210,7 @@ class TTSStream:
         pdata, timing = self._build_prompt_data(text, language, is_clone=False, speaker_id=speaker_id)
         
         # 2. 推理循环
-        lout = self._run_engine_loop(pdata, timing, cfg.temperature, cfg.max_steps)
+        lout = self._run_engine_loop(pdata, timing, cfg)
         
         # 3. 生成结果并设为锚点
         res = self._post_process(text, pdata, lout)
