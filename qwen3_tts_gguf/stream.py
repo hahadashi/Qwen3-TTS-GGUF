@@ -81,45 +81,11 @@ class TTSStream:
         # 1. 准备文本 Prompt 数据
         pdata, timing = self._build_prompt_data(text, language, is_clone=cfg.voice_clone_mode)
         
-        # 2. 推理循环 (流式产出)
-        all_codes = []
-        turn_summed_embeds = []
-        chunk_buffer = []
-        pushed_count = 0
-        
-        # 如果开启流式播放，先重置嘴巴状态
-        if cfg.stream_play and self.mouth:
-            self.mouth.reset()
-            if verbose: logger.info(f"🚀 [TTS] 开始流式推送任务 (TaskID: {self.mouth.active_task_id})")
-            
-        # 迭代生成
-        for step_codes, summed_vec in self._run_engine_loop_gen(pdata, cfg, timing):
-            all_codes.append(step_codes)
-            turn_summed_embeds.append(summed_vec)
-            
-            # 流式分块逻辑
-            if cfg.stream_play and self.mouth:
-                chunk_buffer.append(step_codes)
-                if len(chunk_buffer) >= cfg.mouth_chunk_size:
-                    # 异步丢给子进程，不阻塞主进程推理
-                    self.mouth.decode(np.array(chunk_buffer), is_final=False, stream=True)
-                    pushed_count += len(chunk_buffer)
-                    if verbose: print(f"\r   📡 已推送: {pushed_count:3} 帧 Codec...", end="", flush=True)
-                    chunk_buffer = []
-        
-        # 最后一段处理 (Final)
-        if cfg.stream_play and self.mouth:
-            # 发送剩余的 buffer，并标记 final 以触发最后一段音频输出
-            self.mouth.decode(np.array(chunk_buffer) if chunk_buffer else np.zeros((0, 16)), is_final=True, stream=True)
-            pushed_count += len(chunk_buffer)
-            if verbose: print(f"\n   ✅ 推送完毕, 共计: {pushed_count} 帧。")
-        
-        lout = LoopOutput(all_codes=all_codes, summed_embeds=turn_summed_embeds, timing=timing)
+        # 2. 运行推理循环 (内置流式支持)
+        lout = self._run_engine_loop(pdata, timing, cfg, verbose=verbose)
         
         # 3. 后处理：生成波形并封装结果
-        res = self._post_process(text, pdata, lout, cfg=cfg)
-        res.timing = timing
-        return res
+        return self._post_process(text, pdata, lout, cfg=cfg)
 
     def _build_prompt_data(self, text: str, language: str, is_clone: bool, speaker_id: Optional[str] = None) -> Tuple[PromptData, Timing]:
         """准备 Prompt 并初始化 Timing 对象"""
@@ -135,13 +101,37 @@ class TTSStream:
         timing.prompt_time = pdata.compile_time
         return pdata, timing
 
-    def _run_engine_loop(self, pdata: PromptData, timing: Timing, cfg: TTSConfig) -> LoopOutput:
-        """同步包装器：消耗生成器并返回完整结果"""
+    def _run_engine_loop(self, pdata: PromptData, timing: Timing, cfg: TTSConfig, verbose: bool = False) -> LoopOutput:
+        """核心推理循环：支持生成全量 Codes 并可选进行流式推送"""
         all_codes = []
         turn_summed_embeds = []
+        chunk_buffer = []
+        pushed_count = 0
+        
+        # 流式播放初始化
+        if cfg.stream_play and self.mouth:
+            self.mouth.reset()
+            if verbose: logger.info(f"🚀 [Loop] 开始流式推送任务 (TaskID: {self.mouth.active_task_id})")
+            
         for step_codes, summed_vec in self._run_engine_loop_gen(pdata, cfg, timing):
             all_codes.append(step_codes)
             turn_summed_embeds.append(summed_vec)
+            
+            # 流式分块推送
+            if cfg.stream_play and self.mouth:
+                chunk_buffer.append(step_codes)
+                if len(chunk_buffer) >= cfg.mouth_chunk_size:
+                    self.mouth.decode(np.array(chunk_buffer), is_final=False, stream=True)
+                    pushed_count += len(chunk_buffer)
+                    if verbose: print(f"\r   📡 已推送: {pushed_count:3} 帧 Codec...", end="", flush=True)
+                    chunk_buffer = []
+
+        # 结束流式推送
+        if cfg.stream_play and self.mouth:
+            self.mouth.decode(np.array(chunk_buffer) if chunk_buffer else np.zeros((0, 16)), is_final=True, stream=True)
+            pushed_count += len(chunk_buffer)
+            if verbose: print(f"\n   ✅ 推送完毕, 共计: {pushed_count} 帧。")
+
         return LoopOutput(all_codes=all_codes, summed_embeds=turn_summed_embeds, timing=timing)
 
     def _run_engine_loop_gen(self, pdata: PromptData, cfg: TTSConfig, timing: Timing):
@@ -261,19 +251,21 @@ class TTSStream:
         self.voice = res
         logger.info(f"🎭 Voice switched to: {res.text[:20]}...")
 
-    def set_voice_from_speaker(self, speaker_id: str, text: str, language: str = "chinese", config: Optional[TTSConfig] = None) -> TTSResult:
+    def set_voice_from_speaker(self, speaker_id: str, text: str, language: str = "chinese", config: Optional[TTSConfig] = None, verbose: bool = False) -> TTSResult:
         """从指定内置说话人生成一个音色锚点结果"""
         logger.info(f"📍 Setting Voice from Speaker: {speaker_id}, language: {language}")
         
         cfg = config or TTSConfig()
+        # 强制清空记忆以确保音色纯净
+        self.master.clear_memory()
         
-        # 1. 编译 Prompt (原生模式，不使用 self.voice)
+        # 1. 编译 Prompt
         pdata, timing = self._build_prompt_data(text, language, is_clone=False, speaker_id=speaker_id)
         
-        # 2. 推理循环
-        lout = self._run_engine_loop(pdata, timing, cfg)
+        # 2. 推理循环 (传入 verbose 即可支持流式回显)
+        lout = self._run_engine_loop(pdata, timing, cfg, verbose=verbose)
         
-        # 3. 生成结果并设为锚点
+        # 3. 结果生成并设为当前音色
         res = self._post_process(text, pdata, lout)
         self.set_voice(res)
         return res

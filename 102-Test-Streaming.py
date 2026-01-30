@@ -31,7 +31,8 @@ def test_streaming():
     cfg = TTSConfig(
         stream_play=True,      # 开启流式
         mouth_chunk_size=25,    # 每 25 帧发发一次
-        max_steps = 200
+        max_steps = 200, 
+        temperature=1.5, 
     )
 
     print(f"\n🎧 [Mode: Streaming] 正在合成长文本并实时播放...")

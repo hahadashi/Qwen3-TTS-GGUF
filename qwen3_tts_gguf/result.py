@@ -30,6 +30,12 @@ class Timing:
                 self.master_loop_time + self.craftsman_loop_time + 
                 self.mouth_render_time)
 
+    @property
+    def inference_only_time(self) -> float:
+        """核心推理耗时 (不包含最终的嘴巴渲染/解码)"""
+        return (self.prompt_time + self.prefill_time + 
+                self.master_loop_time + self.craftsman_loop_time)
+
 @dataclass
 class LoopOutput:
     """推理内核循环的输出封装"""
@@ -88,9 +94,9 @@ class TTSResult:
     
     @property
     def rtf(self) -> float:
-        """实时因子 (Real-Time Factor)"""
+        """实时因子 (Real-Time Factor) - 基于核心推理耗时计算"""
         if self.duration == 0 or self.stats is None: return 0.0
-        return self.stats.total_inference_time / self.duration
+        return self.stats.inference_only_time / self.duration
 
     # --- IO 能力 ---
 
@@ -184,4 +190,5 @@ class TTSResult:
         print(f"     └─ 工匠 (Craftsman): {s.craftsman_loop_time:.4f}s")
         print(f"  4. 嘴巴渲染 (Mouth): {s.mouth_render_time:.4f}s")
         print("-" * 40)
-        print(f"总耗时: {s.total_inference_time:.2f}s | RTF: {self.rtf:.2f}")
+        print(f"核心推理耗时: {s.inference_only_time:.2f}s | RTF (Core): {self.rtf:.2f}")
+        print(f"全链路总响应: {s.total_inference_time:.2f}s")
