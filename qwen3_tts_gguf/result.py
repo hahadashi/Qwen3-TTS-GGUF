@@ -53,6 +53,7 @@ class TTSConfig:
     sub_top_k: int = 50
     
     max_steps: int = 600
+    voice_clone_mode: bool = True
 
 @dataclass
 class TTSResult:
@@ -70,8 +71,8 @@ class TTSResult:
 
     @property
     def is_valid_anchor(self) -> bool:
-        """检查该结果是否可以作为克隆锚点 (基本条件是 text_ids, spk_emb, codes)"""
-        return all(x is not None for x in [self.text_ids, self.spk_emb, self.codes])
+        """是否具有作为 Voice 锚点的必要特征"""
+        return self.codes is not None and self.spk_emb is not None
 
     @property
     def duration(self) -> float:
@@ -108,7 +109,7 @@ class TTSResult:
 
     # --- 持久化能力 ---
 
-    def save_json(self, path: str, include_audio: bool = False, include_embeds: bool = False):
+    def save_json(self, path: str, include_audio: bool = False, include_embeds: bool = False, light: bool = False):
         """将特征锚点保存到 JSON"""
         if not self.is_valid_anchor:
             logger.warning("⚠️ Result is incomplete, cannot save as anchor.")
@@ -129,12 +130,13 @@ class TTSResult:
         
         os.makedirs(os.path.dirname(os.path.abspath(path)) or '.', exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        logger.info(f"💾 Identity Anchor saved to {path} (Embeds: {include_embeds}, Audio: {include_audio})")
+            json.dump(data, f, ensure_ascii=False, indent=None if light else 2)
+        
+        logger.info(f"💾 Voice JSON saved to: {path} (Light: {light})")
 
     @classmethod
     def from_json(cls, path: str) -> 'TTSResult':
-        """从 JSON 文件恢复身份锚点"""
+        """从 JSON 文件恢复 Voice 锚点"""
         if not os.path.exists(path):
             raise FileNotFoundError(f"Identity file not found: {path}")
 

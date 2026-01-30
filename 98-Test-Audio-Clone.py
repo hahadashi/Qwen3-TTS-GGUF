@@ -38,8 +38,8 @@ def test_audio_clone():
     stream.reset()
     
     # 5. 使用克隆接口定调
-    print(f"\n3️⃣ 正在从文件克隆身份: {REF_WAV}...")
-    res_clone_id = stream.set_identity_from_clone(
+    print(f"\n3️⃣ 正在从文件克隆音色: {REF_WAV}...")
+    res_clone_id = stream.set_voice_from_clone(
         wav_path=REF_WAV,
         text=REF_TEXT,
         language="chinese"
@@ -50,8 +50,8 @@ def test_audio_clone():
         return
 
     print(f"   ✅ 克隆锚定成功！")
-    print(f"   ├─ 参考文字: '{stream.identity.text}'")
-    print(f"   └─ 提取到的 Codec 帧数: {stream.identity.codes.shape[0]}")
+    print(f"   ├─ 参考文字: '{stream.voice.text}'")
+    print(f"   └─ 提取到的 Codec 帧数: {stream.voice.codes.shape[0]}")
     
     # 6. 使用克隆后的身份合成新文字
     TARGET_TEXT = "行的，我知道了"

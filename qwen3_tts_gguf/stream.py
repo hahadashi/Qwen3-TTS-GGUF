@@ -17,7 +17,7 @@ class TTSStream:
     """
     保存大师、工匠、嘴巴记忆的语音流。
     """
-    def __init__(self, engine, n_ctx=4096):
+    def __init__(self, engine, n_ctx=4096, voice_path: Optional[str] = None):
         self.engine = engine
         self.assets = engine.assets
         self.tokenizer = engine.tokenizer
@@ -30,8 +30,11 @@ class TTSStream:
         self.master = MasterPredictor(engine.m_model, self.m_ctx, self.m_batch, self.assets)
         self.craftsman = CraftsmanPredictor(engine.c_model, self.c_ctx, self.c_batch, self.assets)
         
-        # 3. 身份锚点 (直接使用 TTSResult)
-        self.identity: Optional[TTSResult] = None
+        # 3. 音色锚点 (Voice)
+        self.voice: Optional[TTSResult] = None
+        if voice_path:
+            self.set_voice_from_json(voice_path)
+            
         self.mouth = getattr(engine, 'mouth', None)
 
     def _init_contexts(self):
@@ -54,22 +57,32 @@ class TTSStream:
             language: str = "chinese",
             config: Optional[TTSConfig] = None) -> TTSResult:
         """
-        同步合成接口（要求 Identity 已设置）。
+        同步合成接口。
         """
-        if self.identity is None:
-            raise RuntimeError("Identity is not set. Please call `set_identity` first.")
+        # 0. 检查 Voice 是否已设置
+        if self.voice is None:
+            msg = (
+                "\n❌ Voice is not set! 你必须先设置音色才能进行合成。\n"
+                "你可以尝试以下方法之一：\n"
+                "  1. stream.set_voice_from_speaker('vivian')  <- 使用内置音色\n"
+                "  2. stream.set_voice_from_clone('path.wav')  <- 从外部音频克隆\n"
+                "  3. stream.set_voice_from_json('path.json')  <- 载入持久化音色\n"
+                "  4. engine.create_stream(voice_path='...')   <- 在创建流时指定"
+            )
+            logger.error(msg)
+            raise RuntimeError("Voice not set. Please follow the instructions in the log.")
 
         cfg = config or TTSConfig()
-
-        # 1. 构建 Prompt (由 PromptBuilder 统计耗时)
-        pdata, timing = self._build_prompt_data(text, language, is_clone=True)
-
-        # 2. 驱动内核进行生成 (儿子负责统计推理时间)
-        lout = self._run_engine_loop(pdata, timing, cfg)
-
-        # 3. 后处理 (渲染与封装)
-        res = self._post_process(text, pdata, lout)
         
+        # 1. 准备文本 Prompt 数据
+        pdata, timing = self._build_prompt_data(text, language, is_clone=cfg.voice_clone_mode)
+        
+        # 2. 推理循环：大师自回环 -> 工匠自回环
+        lout = self._run_engine_loop(pdata, timing, cfg)
+        
+        # 3. 后处理：生成波形并封装结果
+        res = self._post_process(text, pdata, lout)
+        res.timing = timing
         return res
 
     def _build_prompt_data(self, text: str, language: str, is_clone: bool, speaker_id: Optional[str] = None) -> Tuple[PromptData, Timing]:
@@ -77,7 +90,7 @@ class TTSStream:
         lang_id = map_language(language)
         
         if is_clone:
-            pdata = PromptBuilder.build_clone_prompt(text, self.identity, self.tokenizer, self.assets, lang_id)
+            pdata = PromptBuilder.build_clone_prompt(text, self.voice, self.tokenizer, self.assets, lang_id)
         else:
             spk_id = map_speaker(speaker_id)
             pdata = PromptBuilder.build_native_prompt(text, self.tokenizer, self.assets, lang_id, spk_id)
@@ -176,10 +189,11 @@ class TTSStream:
         sd.wait()
 
     def reset(self):
-        """完全重置身份和状态"""
-        self.identity = None
-        self.master.clear_memory()
-        self.mouth.reset()
+        """重置流：清除记忆与音色设置"""
+        self.m_ctx.kv_cache_clear()
+        self.c_ctx.kv_cache_clear()
+        self.voice = None
+        logger.info("🧹 Stream memory and voice cleared.")
 
     def shutdown(self):
         """释放占用的资源"""
@@ -193,50 +207,57 @@ class TTSStream:
     def __del__(self):
         self.shutdown()
 
-    def set_identity(self, res: TTSResult):
-        """直接设置身份锚点"""
+    def set_voice(self, res: TTSResult):
+        """
+        命令式设置：直接将一个 TTSResult 设为当前流的音色锚点。
+        """
         if not res.is_valid_anchor:
             raise ValueError("Provided TTSResult is not a valid anchor.")
-        self.identity = res
-        logger.info(f"🔒 Identity locked to text: '{res.text}'")
+        self.voice = res
+        logger.info(f"🎭 Voice switched to: {res.text[:20]}...")
 
-    def set_identity_from_speaker(self, speaker_id: str, text: str, language: str = "chinese", config: Optional[TTSConfig] = None) -> TTSResult:
-        """原生定调：从指定说话人生成一个身份锚点结果"""
-        logger.info(f"📍 Setting Identity from Speaker: {speaker_id}, language: {language}")
+    def set_voice_from_speaker(self, speaker_id: str, text: str, language: str = "chinese", config: Optional[TTSConfig] = None) -> TTSResult:
+        """从指定内置说话人生成一个音色锚点结果"""
+        logger.info(f"📍 Setting Voice from Speaker: {speaker_id}, language: {language}")
         
         cfg = config or TTSConfig()
         
         # 1. 编译 Prompt
-        pdata, timing = self._build_prompt_data(text, language, is_clone=False, speaker_id=speaker_id)
+        pdata, timing = self._build_prompt_data(text, language, cfg, speaker_id=speaker_id)
         
         # 2. 推理循环
         lout = self._run_engine_loop(pdata, timing, cfg)
         
         # 3. 生成结果并设为锚点
         res = self._post_process(text, pdata, lout)
-        self.set_identity(res)
+        self.set_voice(res)
         return res
 
-    def set_identity_from_clone(self, wav_path: str, text: str, language: str = "chinese") -> Union[TTSResult, bool]:
-        """克隆定调：从外部 WAV 文件提取特征并设为身份锚点"""
+    def set_voice_from_clone(self, wav_path: str, text: str, language: str = "chinese") -> Union[TTSResult, bool]:
+        """克隆音色：从外部 WAV 文件提取特征并设为音色锚点"""
         if self.engine.encoder is None:
             logger.info("⚠️ [Stream] 编码器模型未就绪，音色克隆功能不可用。")
             return False
             
-        logger.info(f"🎤 Setting Identity from Clone: {wav_path}")
+        logger.info(f"🎤 Setting Voice from Clone: {wav_path}")
         
         # 1. 提取特征
         codes, spk_emb = self.engine.encoder.encode(wav_path)
         
         # 2. 构造 TTSResult 作为锚点
-        # 注意: 克隆锚点不需要 audio 和 summed_embeds (后者会自动重构)
         res = TTSResult(
             text=text,
-            text_ids=[], # 暂时留空，PromptBuilder 会处理文本
+            text_ids=[], 
             spk_emb=spk_emb,
             codes=codes
         )
         
-        # 3. 设置为当前身份
-        self.set_identity(res)
+        # 3. 设置为当前音色
+        self.set_voice(res)
+        return res
+
+    def set_voice_from_json(self, path: str):
+        """从 JSON 文件恢复音色锚点并设为当前音色"""
+        res = TTSResult.from_json(path)
+        self.set_voice(res)
         return res

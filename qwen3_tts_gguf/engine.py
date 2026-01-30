@@ -7,6 +7,7 @@ import ctypes
 import numpy as np
 from transformers import AutoTokenizer
 
+from typing import Optional, List, Tuple
 from . import llama, logger
 from .assets import AssetsManager
 from .stream import TTSStream
@@ -66,9 +67,9 @@ class TTSEngine:
             
         logger.info("✅ [Engine] GGUF 模型加载完成。")
 
-    def create_stream(self, n_ctx=4096) -> TTSStream:
+    def create_stream(self, n_ctx=4096, voice_path: Optional[str] = None) -> TTSStream:
         """工厂方法：创建语音流"""
-        return TTSStream(self, n_ctx=n_ctx)
+        return TTSStream(self, n_ctx=n_ctx, voice_path=voice_path)
 
     def _do_sample(self, logits, do_sample=True, temperature=0.5, top_p=1.0, top_k=50):
         """引擎内部采样辅助 (供 Stream 调用)"""

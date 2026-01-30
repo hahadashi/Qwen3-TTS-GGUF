@@ -78,7 +78,7 @@ class PromptBuilder:
             
         # [NEW] 特征按需动态重构: 如果没有 summed_embeds，则从 codes 重建
         if anchor.summed_embeds is None or len(anchor.summed_embeds) == 0:
-            logger.info("⚡ Identity summed_embeds is missing. Reconstructing from codes...")
+            logger.info("⚡ Voice summed_embeds is missing. Reconstructing from codes...")
             codes = anchor.codes
             reconstructed = []
             for t in range(codes.shape[0]):
