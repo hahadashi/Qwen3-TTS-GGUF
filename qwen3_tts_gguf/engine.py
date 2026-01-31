@@ -10,7 +10,7 @@ from . import llama, logger
 from .assets import AssetsManager
 from .stream import TTSStream
 from .sampler import sample
-from .decoder import create_decoder
+from .proxy import DecoderProxy
 from .predictors.encoder import EncoderPredictor
 
 class TTSEngine:
@@ -62,7 +62,7 @@ class TTSEngine:
 
             # 3. 异步拉起解码器进程 (并行点 1)
             t_parallel = time.time()
-            self.decoder = create_decoder(str(self.paths["decoder_onnx"]), use_dml=True)
+            self.decoder = DecoderProxy(str(self.paths["decoder_onnx"]), use_dml=True)
             if verbose: print("⏳ [Engine] 正在拉起子进程解码器...")
 
             # 4. 模型引擎初始化 (并行点 2: GGUF 在主进程加载，Decoder 在子进程同时初始化)

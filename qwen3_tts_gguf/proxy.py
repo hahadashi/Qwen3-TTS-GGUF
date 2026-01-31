@@ -1,6 +1,6 @@
 """
 proxy.py - 解码器多进程代理
-分离自 decoder.py，负责主进程与 Worker 之间的通过协议通信。
+分离自 decoder.py，负责主进程与 Worker 之间的协议通信。
 """
 import multiprocessing as mp
 import atexit
@@ -8,9 +8,9 @@ import threading
 import queue
 import time
 import numpy as np
-from typing import Optional
+from typing import Optional, Union
 
-from .protocol import DecodeRequest, DecodeResult, SpeakerRequest
+from .protocol import DecodeRequest, DecoderResponse, SpeakerRequest, SpeakerResponse
 
 class DecoderProxy:
     """
@@ -27,19 +27,29 @@ class DecoderProxy:
         self.task_counter = 0
         self.active_task_id = 0
         
-        # 通讯队列 (传输 Protocol 对象)
+        # 通讯队列
         self.codes_q = mp.Queue()     # 主 -> Decoder (DecodeRequest)
-        self.result_q = mp.Queue()    # Decoder -> Proxy (DecodeResult)
+        self.result_q = mp.Queue()    # Decoder/Speaker -> Proxy (DecoderResponse / SpeakerResponse)
         self.play_q = mp.Queue()      # Proxy -> Playback (SpeakerRequest)
         
         # 进程对象
         self.decoder_proc = None
         self.play_proc = None
         
-        # 结果监听线程 (负责从 result_q 收集数据)
-        self.results = {}             # task_id -> list of (pcm, time)
+        # 状态存储
+        self.results = {}             # task_id -> list of np.ndarray
+        self.events = {}              # task_id -> threading.Event
         self.streaming_results = {}   # task_id -> bool
         self.ready_states = {"decoder": False, "speaker": False}
+        self.speaker_status = "IDLE"  # IDLE, PLAYING, PAUSED
+        self.speaker_idle = threading.Event()
+        self.speaker_idle.set() # 初始为就绪/闲置状态
+        
+        # 解码进度追踪
+        self.active_decoder_tasks = set()
+        self.decoder_idle = threading.Event()
+        self.decoder_idle.set()
+        
         self.stop_listener = False
         self.listener_thread = None
         
@@ -50,7 +60,8 @@ class DecoderProxy:
 
     def start(self):
         """启动工作进程"""
-        from qwen3_tts_gguf.workers import decoder_worker_proc, speaker_worker_proc
+        from .workers.decoder import decoder_worker_proc
+        from .workers.speaker import speaker_worker_proc
         
         # 1. 解调子进程 (Decoder)
         self.decoder_proc = mp.Process(
@@ -61,7 +72,6 @@ class DecoderProxy:
         self.decoder_proc.start()
         
         # 2. 播放子进程 (Speaker)
-        # 监听独立的 play_q，并向 result_q 反馈就绪状态
         self.play_proc = mp.Process(
             target=speaker_worker_proc,
             args=(self.play_q, self.result_q),
@@ -69,67 +79,75 @@ class DecoderProxy:
         )
         self.play_proc.start()
         
-        # 3. 握手：子进程启动后会回传一条消息确认已就绪
-        self._active_provider = "Pending..."
-        
-        # 4. 启动本地监听器
+        # 3. 启动本地监听器
         self.listener_thread = threading.Thread(target=self._listen_loop, daemon=True)
         self.listener_thread.start()
 
-    @property
-    def active_provider(self) -> str:
-        """兼容性属性：返回后端名称"""
-        return "Multiprocessing (Worker)"
-
     def _listen_loop(self):
-        """从结果队列中抓取数据并分类转发"""
+        """从结果队列中抓取数据并分类转发 (后台储蓄罐)"""
         while not self.stop_listener:
             try:
-                msg: DecodeResult = self.result_q.get(timeout=0.1)
+                msg = self.result_q.get(timeout=0.1)
                 if msg is None: break
                 
-                # 处理就绪信号
-                if msg.msg_type == "READY":
-                    # task_id 复用为 worker name: "decoder" or "speaker"
-                    self.ready_states[str(msg.task_id)] = True 
-                    continue
-                
-                # 正常音频数据
-                task_id = msg.task_id
-                pcm = msg.audio
-                dt = msg.compute_time
-                
-                # 1. 存入结果字典供同步获取
-                if task_id not in self.results:
-                    self.results[task_id] = []
-                self.results[task_id].append((pcm, dt))
-                
-                # 2. 如果该任务标记为流式播放，转发给播放进程
-                if task_id in self.streaming_results:
-                    if pcm is not None and len(pcm) > 0:
-                        # 封装为 SpeakerRequest 发送
-                        self.play_q.put(SpeakerRequest(task_id=task_id, msg_type="PLAY", audio=pcm))
+                if isinstance(msg, DecoderResponse):
+                    self._handle_decoder_msg(msg)
+                elif isinstance(msg, SpeakerResponse):
+                    self._handle_speaker_msg(msg)
+
             except queue.Empty:
                 continue
             except Exception as e:
+                print(f"⚠️ [Proxy] 监听异常: {e}")
+                import traceback
+                traceback.print_exc()
                 break
 
-    def reset(self):
-        """重置子进程中的解码器状态"""
-        self.active_task_id = self.task_counter
-        self.task_counter += 1
-        # 发送 RESET 指令
-        req = DecodeRequest(task_id=self.active_task_id, msg_type="RESET")
-        self.codes_q.put(req)
-
-    def cancel_current(self):
-        """取消当前任务 (新增)"""
-        if self.active_task_id == 0: return
+    def _handle_decoder_msg(self, msg: DecoderResponse):
+        """处理来自解码器的消息"""
+        if msg.msg_type == "READY":
+            self.ready_states["decoder"] = True
+            return
+            
+        task_id = msg.task_id
         
-        # 1. 停止 Speaker
-        self.play_q.put(SpeakerRequest(task_id=self.active_task_id, msg_type="STOP"))
-        # 2. 停止 Decoder (尚未实现 CANCEL 类型，暂时还是用 RESET 近似替代或忽略)
-        # TODO: 在 Protocol 中增加 CANCEL 类型
+        # A1. 音频碎片的累积 (储蓄罐)
+        if msg.msg_type == "AUDIO":
+            pcm = msg.audio
+            if pcm is not None and len(pcm) > 0:
+                if task_id not in self.results:
+                    self.results[task_id] = []
+                self.results[task_id].append(pcm)
+                
+                # 如果该任务标记为实时流式播放，同步转发给播放器线路
+                if self.streaming_results.get(task_id):
+                    self.play_q.put(SpeakerRequest(msg_type="AUDIO", audio=pcm))
+
+        # A2. 收到结束信号 (闹钟)
+        elif msg.msg_type == "FINISH":
+            if task_id in self.events:
+                self.events[task_id].set()
+            
+            # 从活跃解码集合中移除
+            if task_id in self.active_decoder_tasks:
+                self.active_decoder_tasks.remove(task_id)
+                if not self.active_decoder_tasks:
+                    self.decoder_idle.set()
+
+    def _handle_speaker_msg(self, msg: SpeakerResponse):
+        """处理来自播放器的消息"""
+        if msg.msg_type == "READY":
+            self.ready_states["speaker"] = True
+        elif msg.msg_type == "STARTED":
+            self.speaker_status = "PLAYING"
+            self.speaker_idle.clear()
+        elif msg.msg_type == "FINISHED":
+            self.speaker_status = "IDLE"
+            self.speaker_idle.set()
+        elif msg.msg_type == "PAUSED":
+            self.speaker_status = "PAUSED"
+            self.speaker_idle.set()
+
 
     def wait_until_ready(self, timeout=10):
         """阻塞直到所有工作进程就绪"""
@@ -140,58 +158,112 @@ class DecoderProxy:
             time.sleep(0.1)
         return False
 
-    def decode(self, codes: np.ndarray, is_final: bool = False, stream: bool = False) -> np.ndarray:
+    def join_speaker(self, timeout: Optional[float] = None):
+        """阻塞等待播放器列表任务清空"""
+        self.speaker_idle.wait(timeout=timeout)
+
+    def join_decoder(self, timeout: Optional[float] = None):
+        """阻塞等待解码器完成所有当前任务"""
+        self.decoder_idle.wait(timeout=timeout)
+
+    def decode(self, codes: np.ndarray, task_id="default", is_final: bool = False, stream: bool = False) -> np.ndarray:
         """
-        跨进程解码。
+        累积式跨进程解码。
         
-        如果 stream=True，则仅将任务推入队列，不等待结果。
-        如果 stream=False，则阻塞直到获取本次任务的所有结果（离线模式）。
+        1. 流式推送包 (stream=True): 立即返回空数组，后台自动累积数据。
+        2. 离线/终结包 (stream=False 或 is_final=True): 阻塞等待所有片段到齐，拼接并返回完整音频。
         """
-        task_id = self.task_counter
-        self.task_counter += 1
-        
-        msg_type = "DECODE_CHUNK" if stream else "DECODE"
+        # 初始化状态位与储蓄罐
+        if task_id not in self.results:
+            self.results[task_id] = []
+        if task_id not in self.events:
+            self.events[task_id] = threading.Event()
+        else:
+            self.events[task_id].clear()
+            
         if stream:
             self.streaming_results[task_id] = True
             
-        # 构造请求对象
+        # 追踪活跃任务
+        if is_final or not stream:
+            self.active_decoder_tasks.add(task_id)
+            self.decoder_idle.clear()
+
+        # 构造并发送请求
+        # 对于 stream=False (离线模式)，Worker 内部会根据 msg_type="DECODE" 自动判定 is_final
+        msg_type = "DECODE_CHUNK" if stream else "DECODE"
         req = DecodeRequest(task_id=task_id, msg_type=msg_type, codes=codes, is_final=is_final)
         self.codes_q.put(req)
         
-        if stream:
+        # 逻辑分支 A: 中间的流式包，无需等待
+        if stream and not is_final:
             return np.array([], dtype=np.float32)
         
-        # 同步等待 (离线模式)
-        start_wait = time.time()
-        collected_pcm = []
-        is_done = False
-        while not is_done and (time.time() - start_wait < 30.0): # 30秒超时
-            if task_id in self.results:
-                msg_list = self.results[task_id]
-                while msg_list:
-                    pcm, dt = msg_list.pop(0)
-                    if pcm is None:
-                        is_done = True
-                        break
-                    collected_pcm.append(pcm)
-            if not is_done:
-                time.sleep(0.01)
+        # 逻辑分支 B: 离线模式或流式终包，开始同步等待
+        self.events[task_id].wait(timeout=30.0) # 30秒硬限制
         
-        if task_id in self.results:
-            del self.results[task_id]
-            
+        collected_pcm = self.results.get(task_id, [])
         if not collected_pcm:
             return np.array([], dtype=np.float32)
-        return np.concatenate(collected_pcm)
+            
+        final_pcm = np.concatenate(collected_pcm)
+        
+        # 清理该任务的残留资源
+        if task_id in self.results: del self.results[task_id]
+        if task_id in self.events: del self.events[task_id]
+        if task_id in self.streaming_results: del self.streaming_results[task_id]
+        
+        return final_pcm
+
+    def pause(self):
+        """发送暂停指令"""
+        self.play_q.put(SpeakerRequest(msg_type="PAUSE"))
+        self.speaker_status = "PAUSED"
+
+    def resume(self):
+        """发送继续指令"""
+        self.play_q.put(SpeakerRequest(msg_type="CONTINUE"))
+
+    def stop(self, task_id="default") -> np.ndarray:
+        """
+        显式停止并清理特定任务，返回已累积的音频。
+        1. 通知 Decoder 丢弃该 Session 缓存。
+        2. 通知 Speaker 截断播放并清空硬件缓冲。
+        3. 提取并返回 Proxy 本地的累积片段，随后清理缓存。
+        """
+        # A. Decoder 线路停止
+        self.codes_q.put(DecodeRequest(task_id=task_id, msg_type="STOP"))
+        
+        # B. Speaker 线路停止 (Speaker 本身不感 ID)
+        self.play_q.put(SpeakerRequest(msg_type="STOP"))
+        self.speaker_status = "IDLE"
+        self.speaker_idle.set()
+        
+        # C. 提取已累积的音频
+        collected_pcm = self.results.get(task_id, [])
+        final_pcm = np.concatenate(collected_pcm) if collected_pcm else np.array([], dtype=np.float32)
+
+        # D. Proxy 本地清理
+        if task_id in self.active_decoder_tasks:
+            self.active_decoder_tasks.remove(task_id)
+            if not self.active_decoder_tasks:
+                self.decoder_idle.set()
+
+        if task_id in self.results: del self.results[task_id]
+        if task_id in self.events: 
+            self.events[task_id].set() # 唤醒可能阻塞在 decode 的线程
+            del self.events[task_id]
+        if task_id in self.streaming_results: del self.streaming_results[task_id]
+
+        return final_pcm
 
     def raw_play(self, pcm: np.ndarray):
-        """直接向播放进程推送原始 PCM 数据 (24kHz, float32)"""
+        """直接推送 PCM"""
         if pcm is not None and len(pcm) > 0:
-            # 这里的 task_id 暂时用 -1 表示系统级播放
-            self.play_q.put(SpeakerRequest(task_id=-1, msg_type="PLAY", audio=pcm))
+            self.play_q.put(SpeakerRequest(msg_type="AUDIO", audio=pcm))
 
     def shutdown(self):
-        """彻底关闭所有子进程，防止僵尸进程及主进程挂起"""
+        """关闭所有子进程"""
         self.stop_listener = True
         
         # 1. 向子进程发送毒丸
@@ -199,10 +271,10 @@ class DecoderProxy:
             if self.decoder_proc and self.decoder_proc.is_alive():
                 self.codes_q.put(None)
             if self.play_proc and self.play_proc.is_alive():
-                self.play_q.put(None) 
+                self.play_q.put(SpeakerRequest(msg_type="EXIT")) 
         except: pass
             
-        # 2. 依次清理子进程 (硬限时 join + terminate)
+        # 2. 依次清理子进程
         for p in [self.decoder_proc, self.play_proc]:
             if p and p.is_alive():
                 p.join(timeout=0.3) 
@@ -214,10 +286,10 @@ class DecoderProxy:
         if self.listener_thread:
             self.listener_thread.join(timeout=0.3)
             
-        # 4. 清理并销毁队列 (取消 join_thread 以防主线程在此挂起)
+        # 4. 清理并销毁队列
         for q in [self.codes_q, self.result_q, self.play_q]:
             try:
-                q.cancel_join_thread() # 关键：不强制等待缓冲区数据刷完，主进程可立即退出
+                q.cancel_join_thread()
                 while not q.empty():
                     q.get_nowait()
                 q.close()

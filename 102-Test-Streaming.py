@@ -4,8 +4,7 @@
 import os
 import sys
 import time
-from qwen3_tts_gguf.engine import TTSEngine
-from qwen3_tts_gguf.result import TTSConfig
+from qwen3_tts_gguf import TTSEngine, TTSConfig
 
 def test_streaming():
 

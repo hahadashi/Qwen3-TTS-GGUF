@@ -26,6 +26,8 @@ LANGUAGE_MAP = {
     "spanish": 2054, 
     "french": 2061, 
     "russian": 2069,
+    "italian": 2070,
+    "portuguese": 2071,
     "beijing_dialect": 2074, 
     "sichuan_dialect": 2062, 
     "auto": 2055 # 默认跟随中文

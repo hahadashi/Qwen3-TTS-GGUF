@@ -7,7 +7,8 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, List, Tuple, Union
 from .constants import PROTOCOL, map_speaker, map_language
-from .result import TTSResult, Timing, LoopOutput, TTSConfig
+from .result import TTSResult, Timing, LoopOutput
+from .config import TTSConfig
 from .predictors.talker import TalkerPredictor
 from .predictors.predictor import Predictor
 
@@ -56,8 +57,26 @@ class TTSStream:
               text: str, 
               language: str = "chinese",
               config: Optional[TTSConfig] = None,
+              streaming: bool = False,
+              chunk_size: int = 25,
               verbose: bool = True) -> Optional[TTSResult]:
-        """[克隆模式]"""
+        """
+        [克隆模式] 使用当前流中已设定的音色锚点（Voice Anchor）进行语音合成。
+
+        Args:
+            text: 待合成的目标文本。
+            language: 目标语言。可选:
+                - 'chinese' (默认), 'english', 'japanese', 'korean'
+                - 'german', 'spanish', 'french', 'russian', 'italian', 'portuguese'
+                - 'beijing_dialect' (北京话), 'sichuan_dialect' (四川话)
+            config: 推理配置对象 (TTSConfig)，可控制 Temperature, Top-P 等采样参数。
+            streaming: 是否启用流式推理。若为 True，则边推理边向播放器推送数据。
+            chunk_size: 流式推理时，每积压多少帧特征码即送去解码播放一次。越小延迟越低，但每次解码会有8帧的额外计算。
+            verbose: 是否输出详细推理进度和时延统计。
+
+        Returns:
+            TTSResult 对象，包含完整音频、特征码及性能统计。
+        """
         if self.voice is None:
             logger.error("❌ 尚未设定音色锚点，请先调用 set_voice()。")
             return None
@@ -72,8 +91,8 @@ class TTSStream:
             timing = Timing()
             timing.prompt_time = pdata.compile_time
             
-            lout = self._run_engine_loop(pdata, timing, cfg, verbose=verbose)
-            return self._post_process(text, pdata, lout, cfg=cfg)
+            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size, verbose=verbose)
+            return self._post_process(text, pdata, lout)
         except Exception as e:
             logger.error(f"❌ Clone 推理失败: {e}")
             return None
@@ -84,8 +103,28 @@ class TTSStream:
                language: str = "chinese",
                instruct: Optional[str] = None,
                config: Optional[TTSConfig] = None,
+               streaming: bool = False,
+               chunk_size: int = 25,
                verbose: bool = True) -> Optional[TTSResult]:
-        """[精品音色模式]"""
+        """
+        [精品音色模式] 使用官方内置的精品预设音色进行合成，支持自然语言渲染指令。
+
+        Args:
+            text: 待合成的目标文本。
+            speaker: 精品音色名称。可选:
+                - 女性: 'vivian', 'serena', 'ono_anna', 'sohee'
+                - 男性: 'ryan', 'aiden', 'uncle_fu'
+                - 方言专用: 'eric' (四川话男声), 'dylan' (北京话男声)
+            language: 目标语言 (见 clone 方法)。
+            instruct: 渲染指令，如 "用温柔的语气说" 或 "充满活力的播报"。
+            config: 推理配置对象 (TTSConfig)。
+            streaming: 是否启用流式推理。
+            chunk_size: 流式推理块大小。
+            verbose: 是否输出详细进度。
+
+        Returns:
+            TTSResult 对象。
+        """
         cfg = config or TTSConfig()
         self.talker.clear_memory()
         
@@ -97,8 +136,8 @@ class TTSStream:
             timing = Timing()
             timing.prompt_time = pdata.compile_time
             
-            lout = self._run_engine_loop(pdata, timing, cfg, verbose=verbose)
-            return self._post_process(text, pdata, lout, cfg=cfg)
+            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size, verbose=verbose)
+            return self._post_process(text, pdata, lout)
         except Exception as e:
             logger.error(f"❌ Custom 推理失败: {e}")
             return None
@@ -108,8 +147,24 @@ class TTSStream:
                instruct: str,
                language: str = "chinese",
                config: Optional[TTSConfig] = None,
+               streaming: bool = False,
+               chunk_size: int = 25,
                verbose: bool = True) -> Optional[TTSResult]:
-        """[音色设计模式]"""
+        """
+        [音色设计模式] 完全通过自然语言描述来设计并生成一个全新的音色。
+
+        Args:
+            text: 待合成的目标文本。
+            instruct: 音色设计描述。例如："体现撒娇稚嫩的萝莉女声，音调偏高且起伏明显。"
+            language: 目标语言 (见 clone 方法)。
+            config: 推理配置对象 (TTSConfig)。
+            streaming: 是否启用流式推理。
+            chunk_size: 流式推理块大小。
+            verbose: 是否输出详细进度。
+
+        Returns:
+            TTSResult 对象。
+        """
         cfg = config or TTSConfig()
         self.talker.clear_memory()
         
@@ -120,8 +175,8 @@ class TTSStream:
             timing = Timing()
             timing.prompt_time = pdata.compile_time
             
-            lout = self._run_engine_loop(pdata, timing, cfg, verbose=verbose)
-            return self._post_process(text, pdata, lout, cfg=cfg)
+            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size, verbose=verbose)
+            return self._post_process(text, pdata, lout)
         except Exception as e:
             logger.error(f"❌ Design 推理失败: {e}")
             return None
@@ -129,27 +184,26 @@ class TTSStream:
     def tts(self, *args, **kwargs):
         return self.clone(*args, **kwargs)
 
-    def _run_engine_loop(self, pdata: PromptData, timing: Timing, cfg: TTSConfig, verbose: bool = False) -> LoopOutput:
+    def _run_engine_loop(self, pdata: PromptData, timing: Timing, cfg: TTSConfig, 
+                         streaming: bool = False, chunk_size: int = 25, verbose: bool = False) -> LoopOutput:
         all_codes = []
         turn_summed_embeds = []
         chunk_buffer = []
-        pushed_count = 0
         
         if self.decoder:
-            self.decoder.reset() # 强制重置，消除上一句的残留状态
+            pass # 信任 Session 自动清理逻辑
             
         for step_codes, summed_vec in self._run_engine_loop_gen(pdata, cfg, timing):
             all_codes.append(step_codes) # 保持 numpy 状态，供 decoder 使用
             turn_summed_embeds.append(summed_vec)
             
-            if cfg.stream_play and self.decoder:
+            if streaming and self.decoder:
                 chunk_buffer.append(step_codes)
-                if len(chunk_buffer) >= cfg.decoder_chunk_size:
+                if len(chunk_buffer) >= chunk_size:
                     self.decoder.decode(np.array(chunk_buffer), is_final=False, stream=True)
-                    pushed_count += len(chunk_buffer)
                     chunk_buffer = []
 
-        if cfg.stream_play and self.decoder:
+        if streaming and self.decoder:
             self.decoder.decode(np.array(chunk_buffer) if chunk_buffer else np.zeros((0, 16)), is_final=True, stream=True)
 
         return LoopOutput(all_codes=all_codes, summed_embeds=turn_summed_embeds, timing=timing)
@@ -196,11 +250,9 @@ class TTSStream:
     def _post_process(self, 
                      text: str, 
                      pdata: PromptData, 
-                     lout: LoopOutput,
-                     cfg: Optional[TTSConfig] = None) -> TTSResult:
+                     lout: LoopOutput) -> TTSResult:
         audio = None
         if self.decoder:
-            self.decoder.reset() # 离线渲染前也必须重置
             t0 = time.time()
             audio = self.decoder.decode(np.array(lout.all_codes), is_final=True, stream=False)
             lout.timing.decoder_render_time = time.time() - t0
@@ -220,6 +272,14 @@ class TTSStream:
         self.predictor_ctx.kv_cache_clear()
         self.voice = None
         logger.info("扫 [Stream] 记忆与音色已清除。")
+
+    def join(self, timeout: Optional[float] = None):
+        """阻塞直至当前流所有音频（解码+播报）全部完毕"""
+        if self.decoder:
+            # 1. 先等解码器把活干完 (Bitstream -> PCM)
+            self.decoder.join_decoder(timeout)
+            # 2. 再等播放器把声音放完 (PCM -> 声卡)
+            self.decoder.join_speaker(timeout)
 
     def shutdown(self):
         try:

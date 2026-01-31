@@ -43,5 +43,6 @@ if not logger.handlers:
 from .llama import init_llama_lib
 from .engine import TTSEngine
 from .result import TTSResult
+from .config import TTSConfig
 
-__all__ = ['logger', 'init_llama_lib', 'TTSEngine', 'TTSResult']
+__all__ = ['logger', 'init_llama_lib', 'TTSEngine', 'TTSResult', 'TTSConfig']

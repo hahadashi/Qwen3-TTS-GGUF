@@ -11,8 +11,8 @@ decoder.py - 状态化解码器封装 (Decoder)
         audio = decoder.decode(codes, is_final=is_final)
         play(audio)
     
-    # 重置状态（新句子）
-    decoder.reset()
+    # 初始化状态
+    decoder.create_state()
 """
 import os
 os.environ["OMP_NUM_THREADS"] = "4"
@@ -65,10 +65,10 @@ class StatefulDecoder:
         # 获取实际使用的 provider
         self.active_provider = self.sess.get_providers()[0]
         
-        # 初始化状态
-        self.reset()
+        # 初始化状态 (工厂调用)
+        self.create_state()
     
-    def reset(self):
+    def create_state(self):
         """
         创建一个全新的、空的解码器状态。
         
@@ -113,7 +113,7 @@ class StatefulDecoder:
                 new_state: 更新后的状态对象 (如果 is_final=True，则可能返回空状态或脏状态，视具体需求而定，但 caller 应该销毁它)
         """
         if state is None:
-            state = self.reset()
+            state = self.create_state()
             
         # 输入规范化
         if audio_codes.ndim == 2:
@@ -147,27 +147,27 @@ class StatefulDecoder:
         valid_samples = int(outputs[1][0])  # 有效样本数
         
         # 构建新状态
+        new_state = self._build_state_from_outputs(outputs)
+        
+        # 提取有效音频
+        audio = final_wav[0, :valid_samples] if valid_samples > 0 else np.array([], dtype=np.float32)
+        
+        return audio.astype(np.float32), new_state
+
+    def _build_state_from_outputs(self, outputs) -> "DecoderState":
+        """从 ONNX 输出构建 DecoderState 对象"""
         from .protocol import DecoderState
+        
         new_state = DecoderState(
-            pre_conv_history = outputs[2],
-            latent_buffer = outputs[3],
-            conv_history = outputs[4],
-            kv_cache = []
+            pre_conv_history=outputs[2],
+            latent_buffer=outputs[3],
+            conv_history=outputs[4],
+            kv_cache=[]
         )
         
-        # 收集 KV Cache: outputs[5...]
-        # 输出顺序: past_key_0, past_value_0, past_key_1, past_value_1 ... 
-        # (注意：onnx 导出时的输出顺序通常是 k0, v0, k1, v1... 需确认，或者这里代码假设是 k0..k7, v0..v7)
-        # 
-        # 让我们回顾一下之前的代码：
-        # for i in range(self.NUM_LAYERS):
-        #     self.past_keys[i] = outputs[5 + i]
-        #     self.past_values[i] = outputs[5 + self.NUM_LAYERS + i]
-        # 
-        # 之前的代码明确显示输出是主要分为两块：Key 块 (5 ~ 5+N) 和 Value 块 (5+N ~ 5+2N)。
-        # 因此我们需要按照这个顺序收集，但存入 DecoderState.kv_cache 时建议保持 k, v, k, v 的交替顺序（方便 feed）或者 split 顺序。
-        # 为了与 feed 循环 (L120) 保持一致 "state.kv_cache[2*i]"，我们这里应该按交替顺序存入 list。
-        
+        # 收集 KV Cache
+        # 输出顺序: Key 块 (5 ~ 5+N) 和 Value 块 (5+N ~ 5+2N)
+        # 我们按交替顺序存入 list: k0, v0, k1, v1 ... 以匹配 feed 循环
         new_kv = []
         base_idx = 5
         num_layers = self.NUM_LAYERS
@@ -179,11 +179,7 @@ class StatefulDecoder:
             new_kv.append(v)
             
         new_state.kv_cache = new_kv
-        
-        # 提取有效音频
-        audio = final_wav[0, :valid_samples] if valid_samples > 0 else np.array([], dtype=np.float32)
-        
-        return audio.astype(np.float32), new_state
+        return new_state
     
     def decode_full(self, audio_codes: np.ndarray) -> np.ndarray:
         """
@@ -204,10 +200,3 @@ class StatefulDecoder:
 
 
 
-# 兼容旧版 API 的工厂函数
-def create_decoder(onnx_path: str, use_dml: bool = True, multiprocessing: bool = True):
-    """创建解码器实例 (decoder)"""
-    if multiprocessing:
-        from .proxy import DecoderProxy
-        return DecoderProxy(onnx_path, use_dml)
-    return StatefulDecoder(onnx_path, use_dml)

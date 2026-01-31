@@ -8,8 +8,7 @@ import time
 # 确保能找到 qwen3_tts_gguf 包
 sys.path.append(os.getcwd())
 
-from qwen3_tts_gguf.engine import TTSEngine
-from qwen3_tts_gguf.result import TTSConfig
+from qwen3_tts_gguf import TTSEngine, TTSConfig
 from qwen3_tts_gguf.constants import SPEAKER_MAP, LANGUAGE_MAP
 
 def print_help():

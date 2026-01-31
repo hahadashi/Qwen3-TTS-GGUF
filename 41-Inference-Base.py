@@ -2,54 +2,50 @@
 41-Inference-Base.py - Qwen3-TTS Base 模型语音克隆脚本 (Engine 版)
 调用 TTSEngine 以确保 Prompt 构造协议的标准性。
 """
-import os
-import soundfile as sf
-import sounddevice as sd
-from qwen3_tts_gguf.engine import TTSEngine
+import time
+from qwen3_tts_gguf import TTSEngine, TTSConfig
 
 def main():
-    # 1. 配置参数
-    TARGET_TEXT = "你好！这是千问3 TTS 的测试。通过调用强大的引擎，我可以精准复刻你的音色。"
-    
-    REF_AUDIO = "output/sample.json"
-    REF_TEXT = "你好，我是千问，你今天过得好吗？"
 
-    # 2. 初始化引擎
+    # 初始化引擎
     print("🚀 [Base-Clone] 正在初始化 TTS 引擎...")
     engine = TTSEngine(model_dir="model-base")
     stream = engine.create_stream()
     
-    # 3. 设置音色锚点 (重要：克隆模式必须先设置)
-    stream.set_voice(REF_AUDIO, text=REF_TEXT)
+    # 设置音色锚点
+
+    # 读取音频文件，需要编码为 Code，是有损克隆
+    # REF_AUDIO = "output/sample.wav"                
+    # REF_TEXT = "你好，我是千问，你今天过得好吗？"
+    # stream.set_voice(REF_AUDIO, REF_TEXT)
+
+    # 从 json 读取 code，无需从 wav 编码，可以无损克隆
+    REF_JSON = "output/sample.json"           
+    stream.set_voice(REF_JSON)
     
-    # 3.1 还原并播放参考音频 (如果加载的是不含音频的 JSON)
-    if stream.voice:
-        print(f"🔊 正在还原参考音频: {REF_AUDIO} ...")
-        stream.voice.decode(engine.decoder)
-        stream.voice.play(blocking=True)
+    # if stream.voice:
+    #     print(f"🔊 正在还原并播放参考音频: {REF_AUDIO} ...")
+    #     stream.voice.decode(engine.decoder)
+    #     stream.voice.play(blocking=True)
     
-    print(f"🎙️  开始克隆推理...")
-    print(f"   参考音频: {REF_AUDIO}")
-    print(f"   目标文本: {TARGET_TEXT}")
-    
-    # 3. 进行推理
-    # 从 stream 对象发起克隆
+
+    # 流式模式下，clone 依然会返回完整 result，但播放是并发进行的
+    print(f"\n🎙️  [2/2] 开始流式推理 (边推边播)...")
+    target_text = "你真是太棒啦！"
+    config = TTSConfig(temperature=0.5)
     result = stream.clone(
-        text=TARGET_TEXT,
-        language="chinese",
+        text=target_text,
+        streaming=True,
         verbose=True
     )
+    result.print_stats()
     
-    # 4. 播放与保存
-    if result.audio is not None:
-        print(f"\n✅ 克隆合成成功！ RTF: {result.rtf:.2f}")
-        sf.write("output_clone_engine.wav", result.audio, 24000)
-        
-        print("🔊 正在播放...")
-        sd.play(result.audio, 24000)
-        sd.wait()
-    else:
-        print("❌ 合成失败，请检查模型资产是否齐全。")
+    print("⏳ 等待流式播放完成 (使用 Event 同步)...")
+    stream.join()
+    time.sleep(0.5)
+
+    result.save("./output/clone_result.wav")     # 保存为音频
+    result.save("./output/clone_result.json")    # 保存为json，内含无损的音频code
 
     engine.shutdown()
 
