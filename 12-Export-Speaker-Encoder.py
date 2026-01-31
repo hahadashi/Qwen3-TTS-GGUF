@@ -9,19 +9,19 @@ from qwen3_tts_gguf.codec_export import SpeakerEncoderExportWrapper
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(PROJECT_ROOT)
 
+from export_config import MODEL_DIR, EXPORT_DIR
+
 def main():
     # 1. 配置路径
-    MODEL_PATH = os.path.abspath("Qwen3-TTS-12Hz-1.7B-Base")
-    OUTPUT_DIR = os.path.abspath("model")
-    ONNX_PATH = os.path.join(OUTPUT_DIR, 'qwen3_tts_speaker_encoder.onnx')
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    ONNX_PATH = os.path.join(EXPORT_DIR, 'qwen3_tts_speaker_encoder.onnx')
+    os.makedirs(EXPORT_DIR, exist_ok=True)
 
-    print(f"载入 Base 模型以导出 Speaker Encoder: {MODEL_PATH}")
+    print(f"载入 Base 模型以导出 Speaker Encoder: {MODEL_DIR}")
     
     try:
         # 加载完整模型
         tts = Qwen3TTSModel.from_pretrained(
-            MODEL_PATH, 
+            MODEL_DIR, 
             device_map="cpu", 
             torch_dtype=torch.float32
         )

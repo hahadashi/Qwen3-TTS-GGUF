@@ -10,13 +10,13 @@ from qwen3_tts_gguf.tokenizer_12hz.modeling_tokenizer import Qwen3TTSTokenizerV2
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "Qwen3-TTS"))
 
+from export_config import MODEL_DIR, EXPORT_DIR
+
 def main():
     # 1. 配置路径
-    MODEL_DIR = r'./Qwen3-TTS-12Hz-1.7B-CustomVoice'
-    OUTPUT_DIR = r'./model'
-    ONNX_PATH = os.path.join(OUTPUT_DIR, 'qwen3_tts_codec_encoder.onnx')
+    ONNX_PATH = os.path.join(EXPORT_DIR, 'qwen3_tts_codec_encoder.onnx')
     
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(EXPORT_DIR, exist_ok=True)
     
     # 路径处理
     logger.info(f"正在加载模型: {MODEL_DIR}")

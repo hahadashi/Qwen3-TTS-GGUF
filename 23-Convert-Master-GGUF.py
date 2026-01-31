@@ -71,10 +71,12 @@ def patched_load_hparams(dir_model: Path, is_mistral_format: bool):
         
     return config
 
+from export_config import EXPORT_DIR
+
 # 4. 转换主逻辑
 def main():
-    MASTER_MODEL_DIR = os.path.join(PROJECT_ROOT, "model", "hf")
-    GGUF_OUT = os.path.join(PROJECT_ROOT, "model", "qwen3_tts_talker.gguf")
+    MASTER_MODEL_DIR = os.path.join(EXPORT_DIR, "hf")
+    GGUF_OUT = os.path.join(EXPORT_DIR, "qwen3_tts_talker.gguf")
 
     print(f"--- 正在执行 GGUF 转换 (零污染、零拷贝流程) ---")
     print(f"源目录: {MASTER_MODEL_DIR}")

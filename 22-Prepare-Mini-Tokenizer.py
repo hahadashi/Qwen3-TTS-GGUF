@@ -5,9 +5,10 @@
 import os
 import json
 
+from export_config import EXPORT_DIR
+
 def create_zero_tokenizer():
-    PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-    TARGET_DIR = os.path.join(PROJECT_ROOT, "model", "hf")
+    TARGET_DIR = os.path.join(EXPORT_DIR, "hf")
     
     if not os.path.exists(TARGET_DIR):
         os.makedirs(TARGET_DIR)

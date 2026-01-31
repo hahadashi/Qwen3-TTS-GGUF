@@ -19,18 +19,19 @@ import json
 import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
+from export_config import MODEL_DIR, EXPORT_DIR
 
 def extract_master_weights():
     """提取大师权重到独立文件"""
 
     # 路径配置
     PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-    ORIGINAL_MODEL_PATH = os.path.join(PROJECT_ROOT, "Qwen3-TTS-12Hz-1.7B-CustomVoice")
+    ORIGINAL_MODEL_PATH = MODEL_DIR
     ORIGINAL_WEIGHTS = os.path.join(ORIGINAL_MODEL_PATH, "model.safetensors")
     ORIGINAL_CONFIG = os.path.join(ORIGINAL_MODEL_PATH, "config.json")
 
     # 输出路径
-    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "model", "hf")
+    OUTPUT_DIR = os.path.join(EXPORT_DIR, "hf")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     OUTPUT_WEIGHTS = os.path.join(OUTPUT_DIR, "model.safetensors")
     OUTPUT_CONFIG = os.path.join(OUTPUT_DIR, "config.json")

@@ -6,10 +6,11 @@ import os
 import shutil
 from pathlib import Path
 
+from export_config import MODEL_DIR, EXPORT_DIR
+
 def main():
     # 1. 配置路径
-    MODEL_DIR = "./Qwen3-TTS-12Hz-1.7B-CustomVoice"
-    OUTPUT_DIR = "model/tokenizer"
+    OUTPUT_DIR = os.path.join(EXPORT_DIR, "tokenizer")
 
     print("🚀 开始复制文本 Tokenizer...")
 

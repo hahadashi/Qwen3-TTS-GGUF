@@ -13,18 +13,18 @@ import numpy as np
 from qwen3_tts_gguf.codec_export import StatefulCodecONNXWrapper
 from qwen3_tts_gguf.tokenizer_12hz.modeling_tokenizer import Qwen3TTSTokenizerV2Model
 
+from export_config import MODEL_DIR, EXPORT_DIR
+
 def main():
     # 1. 配置
-    MODEL_PATH = "./Qwen3-TTS-12Hz-1.7B-CustomVoice"
-    OUTPUT_DIR = "model"
     ONNX_FILENAME = "qwen3_tts_decoder_stateful.onnx"
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(EXPORT_DIR, exist_ok=True)
     
     device = "cpu"
     
     # 2. 加载模型
     print("🚀 正在加载模型...")
-    tokenizer_load_path = os.path.join(MODEL_PATH, "speech_tokenizer") if os.path.exists(os.path.join(MODEL_PATH, "speech_tokenizer")) else MODEL_PATH
+    tokenizer_load_path = os.path.join(MODEL_DIR, "speech_tokenizer") if os.path.exists(os.path.join(MODEL_DIR, "speech_tokenizer")) else MODEL_DIR
     model = Qwen3TTSTokenizerV2Model.from_pretrained(tokenizer_load_path).to(device)
     wrapper = StatefulCodecONNXWrapper(model).to(device)
     wrapper.eval()
@@ -110,7 +110,7 @@ def main():
         dynamic_axes[f"next_value_{i}"] = {2: f"next_seq_{i}"}
     
     # 7. 导出 FP32 模型
-    onnx_path_fp32 = os.path.join(OUTPUT_DIR, ONNX_FILENAME)
+    onnx_path_fp32 = os.path.join(EXPORT_DIR, ONNX_FILENAME)
     print(f"📦 正在导出 FP32 ONNX 到: {onnx_path_fp32}")
     print(f"   使用经典 JIT 路径 (dynamo=False)...")
 

@@ -19,9 +19,11 @@ except ImportError:
     print("Please make sure the Qwen3-TTS repository is cloned correctly.")
     sys.exit(1)
 
+from export_config import MODEL_DIR, EXPORT_DIR
+
 # Configuration
-MODEL_PATH = PROJECT_ROOT / "Qwen3-TTS-12Hz-1.7B-CustomVoice"
-OUTPUT_DIR = PROJECT_ROOT / "model"
+MODEL_PATH = Path(MODEL_DIR)
+OUTPUT_DIR = Path(EXPORT_DIR)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def export_embeddings():
