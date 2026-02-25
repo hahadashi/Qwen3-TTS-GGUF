@@ -11,14 +11,14 @@ Qwen3-TTS Stateful Codec Decoder ONNX 导出脚本 (V4 Dynamo 版)。
 import os
 import torch
 import numpy as np
-from qwen3_tts_gguf.codec_export import StatefulDecoderDynamoCombined
-from qwen3_tts_gguf.tokenizer_12hz.modeling_tokenizer import Qwen3TTSTokenizerV2Model
+from qwen3_tts_gguf.export.codec_export import StatefulDecoderDynamoCombined
+from qwen3_tts_gguf.export.tokenizer_12hz.modeling_tokenizer import Qwen3TTSTokenizerV2Model
 
 from export_config import MODEL_DIR, EXPORT_DIR
 
 def main():
     # 1. 配置
-    ONNX_FILENAME = "qwen3_tts_decoder_stateful.onnx"
+    ONNX_FILENAME = "qwen3_tts_decoder.onnx"
     os.makedirs(EXPORT_DIR, exist_ok=True)
     
     device = "cpu"

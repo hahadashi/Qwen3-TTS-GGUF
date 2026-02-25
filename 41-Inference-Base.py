@@ -3,7 +3,8 @@
 调用 TTSEngine 以确保 Prompt 构造协议的标准性。
 """
 import time
-from qwen3_tts_gguf import TTSEngine, TTSConfig
+from qwen3_tts_gguf.inference.engine import TTSEngine
+from qwen3_tts_gguf.inference.config import TTSConfig
 
 def main():
 
@@ -31,8 +32,8 @@ def main():
 
     # 流式模式下，clone 依然会返回完整 result，但播放是并发进行的
     print(f"\n🎙️  [2/2] 开始流式推理 (边推边播)...")
-    target_text = "你真是太棒啦！"
-    config = TTSConfig(temperature=0.5, max_steps=100)
+    target_text = "很多人对大脑有个天大的误解，觉得这玩意儿是拿来思考的，其实大脑最重要的工作压根不是理解世界，而是防止自己被一惊一乍的世界给吓死，所以它真正的功能是，预测。"
+    config = TTSConfig(temperature=0, sub_temperature=0, max_steps=100)
     result = stream.clone(
         text=target_text,
         streaming=True,

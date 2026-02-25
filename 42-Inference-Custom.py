@@ -2,7 +2,7 @@
 42-Inference-Custom.py - Qwen3-TTS 精品音色推理脚本 (Engine 版)
 """
 import time 
-from qwen3_tts_gguf.engine import TTSEngine
+from qwen3_tts_gguf.inference.engine import TTSEngine
 
 def main():
     
@@ -14,7 +14,7 @@ def main():
 
     # 2. 配置参数
     # 官方支持音色: Vivian, Serena, Uncle_Fu, Dylan, Eric, Ryan, Aiden, Ono_Anna, Sohee
-    TARGET_TEXT = "你好，我是千问，你今天过得好吗？"
+    TARGET_TEXT = "很多人对大脑有个天大的误解，觉得这玩意儿是拿来思考的，其实大脑最重要的工作压根不是理解世界，而是防止自己被一惊一乍的世界给吓死，所以它真正的功能是，预测。"
     SPEAKER = "Vivian"
     INSTRUCT = "用温柔的语气说"
 

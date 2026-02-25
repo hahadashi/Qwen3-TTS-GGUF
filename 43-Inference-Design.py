@@ -1,7 +1,7 @@
 """
 43-Inference-Design.py - Qwen3-TTS 音色设计推理脚本 (Engine 版)
 """
-from qwen3_tts_gguf.engine import TTSEngine
+from qwen3_tts_gguf.inference.engine import TTSEngine
 
 def main():
     

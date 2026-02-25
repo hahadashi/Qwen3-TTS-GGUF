@@ -13,7 +13,7 @@ from pathlib import Path
 
 # 1. 确保能导入 qwen3_tts_gguf 目录下的模块
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-CONVERT_LIB_DIR = os.path.join(PROJECT_ROOT, "qwen3_tts_gguf")
+CONVERT_LIB_DIR = os.path.join(PROJECT_ROOT, "qwen3_tts_gguf", 'export')
 
 if CONVERT_LIB_DIR not in sys.path:
     # 插入到最前面以确保优先加载
@@ -85,7 +85,7 @@ def main():
     # [步骤 A] 检查必要文件
     required_files = ["model.safetensors", "config.json", "tokenizer.json"]
     for f in required_files:
-        if not os.path.exists(os.path.join(MASTER_MODEL_DIR, f)):
+        if not os.path.exists(os.path.join(TALKER_MODEL_DIR, f)):
             print(f"❌ 错误: 缺少必要文件 {f}，请制作模型后再运行。")
             sys.exit(1)
 

@@ -3,7 +3,7 @@ import sys
 import torch
 import torch.nn as nn
 from qwen_tts import Qwen3TTSModel
-from qwen3_tts_gguf.codec_export import SpeakerEncoderExportWrapper
+from qwen3_tts_gguf.export.codec_export import SpeakerEncoderExportWrapper
 
 # 添加项目根目录到 sys.path
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
