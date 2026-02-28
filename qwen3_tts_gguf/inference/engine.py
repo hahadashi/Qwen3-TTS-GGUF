@@ -11,7 +11,7 @@ from .assets import AssetsManager
 from .stream import TTSStream
 
 from .proxy import DecoderProxy
-from .predictors.encoder import EncoderPredictor
+from .encoder import CodecEncoder, SpeakerEncoder
 
 class TTSEngine:
     """
@@ -54,10 +54,12 @@ class TTSEngine:
             if verbose: print(f"📦 [Engine] 资产与词表加载完成 (耗时: {time.time()-t_assets:.2f}s)")
             
             # 2. 音频及说话人编码器 (CPU 轻量型)
-            self.encoder = None
+            self.codec_encoder = None
+            self.speaker_encoder = None
             if self.paths["codec_enc_onnx"].exists() and self.paths["spk_enc_onnx"].exists():
                 t_enc = time.time()
-                self.encoder = EncoderPredictor(str(self.paths["codec_enc_onnx"]), str(self.paths["spk_enc_onnx"]), use_dml=False)
+                self.codec_encoder = CodecEncoder(str(self.paths["codec_enc_onnx"]))
+                self.speaker_encoder = SpeakerEncoder(str(self.paths["spk_enc_onnx"]))
                 if verbose: print(f"🎤 [Engine] 编码器加载完成 (耗时: {time.time()-t_enc:.2f}s)")
 
             # 3. 异步拉起解码器进程 (并行点 1)
@@ -109,7 +111,7 @@ class TTSEngine:
             logger.error(f"❌ 加载 GGUF 模型失败 (可能是显存不足/OOM): {e}")
             raise
 
-    def create_stream(self, n_ctx=4096, voice_path: Optional[str] = None) -> Optional[TTSStream]:
+    def create_stream(self, n_ctx=2048, voice_path: Optional[str] = None) -> Optional[TTSStream]:
         """工厂方法：创建语音流"""
         if not self.ready:
             logger.error("❌ 引擎未就绪，无法创建语音流。")

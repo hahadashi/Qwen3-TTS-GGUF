@@ -1,14 +1,14 @@
 """
-predictors/talker.py - 大师预测器 (Talker)
+talker.py - 大师预测器 (Talker)
 负责 Qwen3-TTS 的主体 LLM 推理。
 管理 llama.cpp 上下文、KV Cache 和步数。
 """
 import ctypes
 import numpy as np
 import time
-from .. import llama
+from . import llama
 
-from ..constants import PROTOCOL
+from .constants import PROTOCOL
 
 class TalkerPredictor:
     """

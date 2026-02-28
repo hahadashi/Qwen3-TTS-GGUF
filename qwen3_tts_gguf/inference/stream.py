@@ -10,8 +10,8 @@ from typing import Optional, List, Tuple, Union
 from .constants import PROTOCOL, map_speaker, map_language
 from .result import TTSResult, Timing, LoopOutput
 from .config import TTSConfig
-from .predictors.talker import TalkerPredictor
-from .predictors.predictor import Predictor
+from .talker import TalkerPredictor
+from .predictor import Predictor
 
 from . import llama, logger
 from .prompt_builder import PromptBuilder, PromptData
@@ -21,7 +21,7 @@ class TTSStream:
     """
     保存 Talker, Predictor, Decoder 记忆的语音流。
     """
-    def __init__(self, engine, n_ctx=4096, voice_path: Optional[str] = None):
+    def __init__(self, engine, n_ctx=2048, voice_path: Optional[str] = None):
         self.engine = engine
         self.assets = engine.assets
         self.tokenizer = engine.tokenizer
@@ -45,10 +45,10 @@ class TTSStream:
         """初始化此语音流专属的推理环境"""
         # engine.talker_model 是 LlamaModel 对象
         self.talker_ctx = llama.LlamaContext(self.engine.talker_model, n_ctx=self.n_ctx, embeddings=True)
-        self.predictor_ctx = llama.LlamaContext(self.engine.predictor_model, n_ctx=512, embeddings=False)
+        self.predictor_ctx = llama.LlamaContext(self.engine.predictor_model, n_ctx=64, embeddings=False)
         
         self.talker_batch = llama.LlamaBatch(self.n_ctx, embd_dim=2048)
-        self.predictor_batch = llama.LlamaBatch(32, embd_dim=1024)
+        self.predictor_batch = llama.LlamaBatch(2, embd_dim=1024)
 
     # =========================================================================
     # 核心推理 API
@@ -245,7 +245,13 @@ class TTSStream:
             seed=cfg.seed
         )
         # 工匠阶段 (Predictor): 通常使用简洁采样，不应用惩罚项以保持声音稳定
-        predictor_sampler = self._create_sampler(cfg.sub_do_sample, cfg.sub_temperature, cfg.sub_top_p, cfg.sub_top_k, seed=cfg.seed)
+        predictor_sampler = self._create_sampler(
+            cfg.sub_do_sample, 
+            cfg.sub_temperature, 
+            cfg.sub_top_p, 
+            cfg.sub_top_k, 
+            seed=cfg.seed
+        )
         
         # 惩罚项豁免名单：不希望因为生成过 EOS/BOS 而降低结尾概率
         allow_tokens = {PROTOCOL["EOS"], PROTOCOL["PAD"], PROTOCOL["BOS"]}
@@ -383,30 +389,27 @@ class TTSStream:
 
     def _set_voice_from_audio(self, wav_path: Path, text: str) -> bool:
         """从音频文件克隆音色：使用 pydub 标准化输入"""
-        if self.engine.encoder is None:
+        if self.engine.codec_encoder is None or self.engine.speaker_encoder is None:
             logger.error("⚠️ 编码器模块未加载，无法执行音色克隆。")
             return False
             
         logger.info(f"🎤 正在从音频提取音色特征: {wav_path.name}")
         
-        # 1. 万能格式转换与预处理
+        # 1. 万能格式转换与预处理 (24kHz, Mono, float32)
         samples = preprocess_audio(wav_path)
         if samples is None:
             return False
             
-        # 2. 交互过渡: 编码器目前只接受文件路径，因此我们需要一个临时 wav
-        temp_wav = save_temp_wav(samples)
+        # 2. 推理提取特征 (直接传入内存 samples，不再依赖临时文件)
         try:
-            codes, spk_emb = self.engine.encoder.encode(temp_wav)
+            codes = self.engine.codec_encoder.encode(samples)
+            spk_emb = self.engine.speaker_encoder.encode(samples)
+            
             res = TTSResult(text=text, text_ids=self.tokenizer.encode(text).ids, spk_emb=spk_emb, codes=codes)
             return self._set_voice_from_result(res)
         except Exception as e:
             logger.error(f"❌ 音声特征提取失败: {e}")
             return False
-        finally:
-            if os.path.exists(temp_wav):
-                try: os.remove(temp_wav)
-                except: pass
 
     def set_voice_from_speaker(self, speaker_id: str, text: str, **kwargs) -> Optional[TTSResult]:
         """从内置说话人生成音色锚点并设置"""

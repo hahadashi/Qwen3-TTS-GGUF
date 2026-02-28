@@ -1,10 +1,10 @@
 """
-predictors/predictor.py - 工匠预测器 (Predictor)
+predictor.py - 工匠预测器 (Predictor)
 负责单帧 Codec 详细码 (Q1-Q15) 的阶梯式推理。
 """
 import ctypes
 import numpy as np
-from .. import llama
+from . import llama
 
 
 class Predictor:
