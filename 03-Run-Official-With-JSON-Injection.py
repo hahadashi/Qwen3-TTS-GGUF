@@ -37,7 +37,7 @@ def main():
     qwen_model = Qwen3TTSModel.from_pretrained(
         str(MODEL_DIR),
         device_map=device,
-        dtype=torch.float32,
+        dtype=torch.bfloat16,
     )
 
     # 3. 构造 VoiceClonePromptItem (关键：全量 16 层注入)
@@ -66,6 +66,8 @@ def main():
         text=TARGET_TEXT,
         language="Chinese",
         voice_clone_prompt=[prompt_item], # 这里是核心注入点
+        temperature=0.9, 
+        subtalker_temperature=0.9, 
         do_sample=False,                 # 确定性生成
         subtalker_dosample=False
     )

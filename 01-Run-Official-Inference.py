@@ -44,7 +44,7 @@ def main():
         print("Starting model load...")
         
         # Define dtype
-        dtype = torch.float32 if device == "cpu" else torch.bfloat16
+        dtype = torch.bfloat16
         
         t_load_start = time.time()
         tts = Qwen3TTSModel.from_pretrained(
