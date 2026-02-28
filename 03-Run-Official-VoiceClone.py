@@ -6,12 +6,16 @@ import random
 import numpy as np
 import soundfile as sf
 import subprocess
+import functools
+import types
+import traceback
 from pathlib import Path
 from export_config import MODEL_BASE as MODEL_DIR
+from qwen3_tts_gguf.inference.result import TTSResult, Timing
+from qwen3_tts_gguf.inference.capturer import OfficialCapturer
 
 ROOT_DIR = Path(__file__).parent
 sys.path.insert(0, str(ROOT_DIR / "Qwen3-TTS-main"))
-
 from qwen_tts import Qwen3TTSModel
 
 def set_seed(seed):
@@ -55,6 +59,9 @@ def main():
         t_load_end = time.time()
         load_time = t_load_end - t_load_start
         print(f"模型加载完成，耗时 {load_time:.4f} 秒。")
+
+        # --- 初始化自动捕获器 ---
+        capturer = OfficialCapturer(tts)
         
         # 设定生成参数
         # 这里使用 01 生成的第一个音频作为参考音频
@@ -71,7 +78,8 @@ def main():
         for i in range(3):
             print(f"\n--- [Voice Clone] 正在生成第 {i+1} 个音频 ---")
             t_infer_start = time.time()
-            wavs, sr = tts.generate_voice_clone(
+            # 现在直接返回 TTSResult
+            res = tts.generate_voice_clone(
                 text=target_text,
                 language="Chinese",
                 ref_audio=ref_audio,
@@ -83,15 +91,15 @@ def main():
             infer_time = t_infer_end - t_infer_start
             print(f"推理完成，耗时 {infer_time:.4f} 秒。")
 
-            # 保存并播放音频
-            output_file = f"output/clone_{i+1}.wav"
-            sf.write(output_file, wavs[0], sr)
-            print(f"音频已保存至: {output_file}")
-            play_audio(output_file)
+            # --- 保存并播放音频 ---
+            output_base = f"output/clone_{i+1}"
+            res.save_json(f"{output_base}.json")
+            res.save_wav(f"{output_base}.wav")
+            print(f"音频与元数据已保存至: {output_base}.*")
+            res.play()
 
     except Exception as e:
         print(f"推理失败: {e}")
-        import traceback
         traceback.print_exc()
 
 if __name__ == "__main__":
