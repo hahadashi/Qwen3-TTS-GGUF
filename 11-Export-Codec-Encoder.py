@@ -14,7 +14,7 @@ from export_config import MODEL_DIR, EXPORT_DIR
 
 def main():
     # 1. 配置路径
-    ONNX_PATH = os.path.join(EXPORT_DIR, 'qwen3_tts_codec_encoder.onnx')
+    ONNX_PATH = os.path.join(EXPORT_DIR, 'qwen3_tts_codec_encoder.fp32.onnx')
     
     os.makedirs(EXPORT_DIR, exist_ok=True)
     
@@ -26,7 +26,7 @@ def main():
     # 2. 加载 PyTorch 模型
     try:
         # 这将加载使用 Internal Mimi 的模型，已经包含了 Dynamo Fix
-        model = Qwen3TTSTokenizerV2Model.from_pretrained(load_path, torch_dtype=torch.float32)
+        model = Qwen3TTSTokenizerV2Model.from_pretrained(load_path)
         model.eval()
         
         # 全局禁用 return_dict (双重保险)
@@ -35,7 +35,7 @@ def main():
             model.encoder.config.return_dict = False
         
         # 移除 Weight Norm (Mimi 内部提供了便捷方法)
-        logger.info("Removing weight norm...")
+        logger.info("正在移除权重归一化 (Weight Norm)...")
         model.encoder.apply(lambda m: m.remove_weight_norm() if hasattr(m, 'remove_weight_norm') else None)
             
     except Exception as e:

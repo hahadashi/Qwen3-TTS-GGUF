@@ -19,7 +19,7 @@ def extract_talker_weights():
     ORIGINAL_CONFIG = os.path.join(ORIGINAL_MODEL_PATH, "config.json")
 
     # 输出路径
-    OUTPUT_DIR = os.path.join(EXPORT_DIR, "hf")
+    OUTPUT_DIR = os.path.join(EXPORT_DIR, "talker_hf")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     OUTPUT_WEIGHTS = os.path.join(OUTPUT_DIR, "model.safetensors")
     OUTPUT_CONFIG = os.path.join(OUTPUT_DIR, "config.json")
@@ -57,7 +57,7 @@ def extract_talker_weights():
             # Talker backbone 权重: talker.model.*
             if key.startswith("talker.model."):
                 new_key = key.replace("talker.model.", "")
-                tensor = f.get_tensor(key).float() # 强制转成 float32
+                tensor = f.get_tensor(key)
 
                 if key == "talker.model.codec_embedding.weight":
                     print(f"  已提取 codec embedding: {key}, 形状: {tensor.shape}")
@@ -71,7 +71,7 @@ def extract_talker_weights():
                 print(f"  已提取: {key} -> {new_key}, 形状: {tensor.shape}")
 
             elif key == "talker.codec_head.weight":
-                codec_head_weight = f.get_tensor(key).float()
+                codec_head_weight = f.get_tensor(key)
                 print(f"  已提取: {key}, 形状: {codec_head_weight.shape}")
 
             else:

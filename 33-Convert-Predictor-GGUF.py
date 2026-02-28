@@ -34,7 +34,7 @@ from export_config import EXPORT_DIR
 # 4. 转换主逻辑
 def main():
     PREDICTOR_DIR = os.path.join(EXPORT_DIR, "predictor_hf")
-    GGUF_OUT = os.path.join(EXPORT_DIR, "qwen3_tts_predictor.gguf")
+    GGUF_OUT = os.path.join(EXPORT_DIR, "qwen3_tts_predictor.f16.gguf")
 
     print(f"--- 正在将 Predictor 组件转换为 GGUF ---")
     print(f"源目录: {PREDICTOR_DIR}")

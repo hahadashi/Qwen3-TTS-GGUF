@@ -75,8 +75,8 @@ from export_config import EXPORT_DIR
 
 # 4. 转换主逻辑
 def main():
-    TALKER_MODEL_DIR = os.path.join(EXPORT_DIR, "hf")
-    GGUF_OUT = os.path.join(EXPORT_DIR, "qwen3_tts_talker.gguf")
+    TALKER_MODEL_DIR = os.path.join(EXPORT_DIR, "talker_hf")
+    GGUF_OUT = os.path.join(EXPORT_DIR, "qwen3_tts_talker.f16.gguf")
 
     print(f"--- 正在执行 GGUF 转换 (Talker) ---")
     print(f"源目录: {TALKER_MODEL_DIR}")

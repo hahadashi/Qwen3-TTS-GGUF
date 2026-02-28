@@ -18,7 +18,7 @@ from export_config import MODEL_DIR, EXPORT_DIR
 
 def main():
     # 1. 配置
-    ONNX_FILENAME = "qwen3_tts_decoder.onnx"
+    ONNX_FILENAME = "qwen3_tts_decoder.fp32.onnx"
     os.makedirs(EXPORT_DIR, exist_ok=True)
     
     device = "cpu"
@@ -26,7 +26,7 @@ def main():
     # 2. 加载原始模型
     print("🚀 正在加载模型...")
     tokenizer_load_path = os.path.join(MODEL_DIR, "speech_tokenizer") if os.path.exists(os.path.join(MODEL_DIR, "speech_tokenizer")) else MODEL_DIR
-    model = Qwen3TTSTokenizerV2Model.from_pretrained(tokenizer_load_path, torch_dtype=torch.float32).to(device)
+    model = Qwen3TTSTokenizerV2Model.from_pretrained(tokenizer_load_path).to(device)
     
     # 【CRITICAL】应用 Transformer 导出优化补丁
     # 这两行确保了计算图在 Dynamo 分析阶段是确定且 DML 友好的

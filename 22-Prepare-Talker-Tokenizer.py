@@ -8,7 +8,7 @@ import json
 from export_config import EXPORT_DIR
 
 def create_zero_tokenizer():
-    TARGET_DIR = os.path.join(EXPORT_DIR, "hf")
+    TARGET_DIR = os.path.join(EXPORT_DIR, "talker_hf")
     
     if not os.path.exists(TARGET_DIR):
         os.makedirs(TARGET_DIR)

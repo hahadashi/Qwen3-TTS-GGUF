@@ -2,18 +2,18 @@ import os
 import sys
 import torch
 import torch.nn as nn
-from qwen_tts import Qwen3TTSModel
+from pathlib import Path
 from qwen3_tts_gguf.export.codec_export import SpeakerEncoderExportWrapper
 
-# 添加项目根目录到 sys.path
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(PROJECT_ROOT)
+ROOT_DIR = Path(__file__).parent
+sys.path.insert(0, str(ROOT_DIR / "Qwen3-TTS-main"))
+from qwen_tts import Qwen3TTSModel
 
 from export_config import MODEL_DIR, EXPORT_DIR
 
 def main():
     # 1. 配置路径
-    ONNX_PATH = os.path.join(EXPORT_DIR, 'qwen3_tts_speaker_encoder.onnx')
+    ONNX_PATH = os.path.join(EXPORT_DIR, 'qwen3_tts_speaker_encoder.fp32.onnx')
     os.makedirs(EXPORT_DIR, exist_ok=True)
 
     print(f"载入 Base 模型以导出 Speaker Encoder: {MODEL_DIR}")
@@ -23,7 +23,6 @@ def main():
         tts = Qwen3TTSModel.from_pretrained(
             MODEL_DIR, 
             device_map="cpu", 
-            torch_dtype=torch.float32
         )
         
         # 2. 提取 Speaker Encoder 模块
