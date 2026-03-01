@@ -7,7 +7,7 @@ from export_config import EXPORT_DIR
 PROJECT_ROOT = Path(__file__).parent.absolute()
 QUANTIZE_EXE = PROJECT_ROOT / "qwen3_tts_gguf" / "inference" / "bin" / "llama-quantize.exe"
 
-QUANTIZE_TYPE = "q4_k"
+QUANTIZE_TYPE = "q8_0"
 MODEL_DIR = Path(EXPORT_DIR)
 INPUT_MODEL = MODEL_DIR / "qwen3_tts_predictor.f16.gguf"
 OUTPUT_MODEL = MODEL_DIR / f"qwen3_tts_predictor.{QUANTIZE_TYPE}.gguf"
