@@ -676,9 +676,9 @@ class MimiAttention(nn.Module):
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
 
-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        query_states = query_states.unflatten(-1, (self.num_heads, self.head_dim)).transpose(1, 2)
+        key_states = key_states.unflatten(-1, (self.num_key_value_heads, self.head_dim)).transpose(1, 2)
+        value_states = value_states.unflatten(-1, (self.num_key_value_heads, self.head_dim)).transpose(1, 2)
 
         cos, sin = self.rotary_emb(value_states, position_ids)
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
@@ -710,7 +710,7 @@ class MimiAttention(nn.Module):
 
         attn_output = attn_output.transpose(1, 2).contiguous()
 
-        attn_output = attn_output.view(bsz, q_len, -1)
+        attn_output = attn_output.flatten(2)
         attn_output = self.o_proj(attn_output)
 
         if not output_attentions:
@@ -764,9 +764,9 @@ class MimiFlashAttention2(MimiAttention):
         # Flash attention requires the input to have the shape
         # batch_size x seq_length x head_dim x hidden_dim
         # therefore we just need to keep the original shape
-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        query_states = query_states.unflatten(-1, (self.num_heads, self.head_dim)).transpose(1, 2)
+        key_states = key_states.unflatten(-1, (self.num_key_value_heads, self.head_dim)).transpose(1, 2)
+        value_states = value_states.unflatten(-1, (self.num_key_value_heads, self.head_dim)).transpose(1, 2)
 
         cos, sin = self.rotary_emb(value_states, position_ids)
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
@@ -881,9 +881,9 @@ class MimiSdpaAttention(MimiAttention):
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
 
-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        query_states = query_states.unflatten(-1, (self.num_heads, self.head_dim)).transpose(1, 2)
+        key_states = key_states.unflatten(-1, (self.num_key_value_heads, self.head_dim)).transpose(1, 2)
+        value_states = value_states.unflatten(-1, (self.num_key_value_heads, self.head_dim)).transpose(1, 2)
 
         cos, sin = self.rotary_emb(value_states, position_ids)
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
@@ -921,7 +921,7 @@ class MimiSdpaAttention(MimiAttention):
         )
 
         attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output = attn_output.view(bsz, q_len, -1)
+        attn_output = attn_output.flatten(2)
 
         attn_output = self.o_proj(attn_output)
 
@@ -1229,7 +1229,7 @@ class MimiEuclideanCodebook(nn.Module):
         # quantize
         embed_ind = self.quantize(hidden_states)
         # post-process
-        embed_ind = embed_ind.view(*shape[:-1])
+        embed_ind = embed_ind.unflatten(0, shape[:-1])
         return embed_ind
 
     # Copied from transformers.models.encodec.modeling_encodec.EncodecEuclideanCodebook.decode
