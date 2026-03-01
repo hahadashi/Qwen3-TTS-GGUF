@@ -16,29 +16,6 @@ from qwen3_tts_gguf.inference.prompt_builder import PromptBuilder
 # os.environ["GGML_VK_DISABLE_F16"] = "1"       # 禁止 VulkanFP16 计算（Intel集显fp16有溢出问题）
 
 
-# --- [DEBUG] 打桩逻辑：保存 Prompt Embedding ---
-_original_build_core = PromptBuilder._build_core
-
-def _hooked_build_core(*args, **kwargs):
-    pdata = _original_build_core(*args, **kwargs)
-    
-    # 保存路径
-    debug_dir = "./output/debug_embeddings"
-    os.makedirs(debug_dir, exist_ok=True)
-    
-    timestamp = int(time.time() * 1000)
-    save_path = os.path.join(debug_dir, f"prompt_emb_{timestamp}.npy")
-    
-    # 保存 pdata.embd (通常是 [1, seq, 2048])
-    np.save(save_path, pdata.embd)
-    print(f"📌 [DEBUG-STUB] Prompt embedding 已保存至: {save_path} (Shape: {pdata.embd.shape})")
-    
-    return pdata
-
-# 载入模型后/推理前完成替换
-PromptBuilder._build_core = _hooked_build_core
-# --------------------------------------------
-
 def main():
 
     # 初始化引擎
