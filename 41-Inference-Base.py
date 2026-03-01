@@ -43,7 +43,7 @@ def main():
 
     # 初始化引擎
     print("🚀 [Base-Clone] 正在初始化 TTS 引擎...")
-    engine = TTSEngine(model_dir="model-base")
+    engine = TTSEngine(model_dir="model-base-0.6")
     stream = engine.create_stream()
     
     # 设置音色锚点

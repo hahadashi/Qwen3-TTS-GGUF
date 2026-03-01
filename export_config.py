@@ -10,10 +10,13 @@ model_home = Path('~/.cache/modelscope/hub/models/Qwen').expanduser()
 MODEL_BASE   =  model_home / 'Qwen3-TTS-12Hz-1.7B-Base'
 MODEL_CUSTOM =  model_home / 'Qwen3-TTS-12Hz-1.7B-CustomVoice'
 MODEL_DESIGN =  model_home / 'Qwen3-TTS-12Hz-1.7B-VoiceDesign'
+MODEL_BASE_small   =  model_home / 'Qwen3-TTS-12Hz-0.6B-Base'
 
-MODEL_DIR =  MODEL_BASE
+MODEL_DIR =  MODEL_BASE_small
 
 # [导出目标路径] 转换后的 ONNX, GGUF 和权重汇总目录
-EXPORT_DIR = r'./model-base'
+# EXPORT_DIR = r'./model-base'
 # EXPORT_DIR = r'./model-custom'
 # EXPORT_DIR = r'./model-design'
+
+EXPORT_DIR = r'./model-base-0.6'
