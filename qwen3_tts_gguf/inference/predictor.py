@@ -23,12 +23,18 @@ class Predictor:
         """
         为给定的 Master 隐层状态和第一个码，生成完整的 16 个码。
         """
-        # 1. 准备输入：Master Hidden (投影后) + Code_0 Embedding (投影后)
+        # 1. 准备输入：Master Hidden + Code_0 Embedding
         proj = self.assets.proj
-        m_h_1024 = master_hidden @ proj["weight"].T + proj["bias"]
+        if proj is not None:
+            # 1.7B 模式：从 2048 投影到 1024
+            m_h_1024 = master_hidden @ proj["weight"].T + proj["bias"]
+        else:
+            # 0.6B 模式：本身就是 1024
+            m_h_1024 = master_hidden
         
         step_codes = [code_0]
-        step_embeds_2048 = [self.assets.get_codec_embedding(0, code_0).copy()]
+        # 获取原始维度 Embedding (0.6B 是 1024, 1.7B 是 2048)
+        step_embeds_raw = [self.assets.get_codec_embedding(0, code_0).copy()]
         
         c_in = np.stack([m_h_1024, self.assets.get_codec_embedding_1024(0, code_0)], axis=0)
         
@@ -65,7 +71,7 @@ class Predictor:
                 c = token_id - start_offset
                 
                 step_codes.append(c)
-                step_embeds_2048.append(self.assets.get_codec_embedding(cs, c).copy())
+                step_embeds_raw.append(self.assets.get_codec_embedding(cs, c).copy())
                 
                 if cs < 15:
                     emb_1024 = self.assets.get_codec_embedding_1024(cs, c)
@@ -79,4 +85,4 @@ class Predictor:
             if local_sampler:
                 sampler.free()
                 
-        return step_codes, step_embeds_2048
+        return step_codes, step_embeds_raw

@@ -67,8 +67,9 @@ class TalkerPredictor:
         if llama_status != 0:
             raise RuntimeError(f"Talker Prefill Decode failed with status {llama_status} at pos {self.cur_pos}")
 
+        hidden_dim = self.assets.text_table.shape[1]
         hidden_ptr = self.ctx.get_embeddings()
-        hidden = np.ctypeslib.as_array(hidden_ptr, shape=(n_p, 2048))[-1].copy()
+        hidden = np.ctypeslib.as_array(hidden_ptr, shape=(n_p, hidden_dim))[-1].copy()
         
         self.cur_pos += n_p
         return hidden
@@ -106,8 +107,9 @@ class TalkerPredictor:
         if llama_status != 0:
             raise RuntimeError(f"Talker Step Decode failed at pos {self.cur_pos}")
 
+        hidden_dim = self.assets.text_table.shape[1]
         hidden_ptr = self.ctx.get_embeddings()
-        hidden = np.ctypeslib.as_array(hidden_ptr, shape=(1, 2048))[0].copy()
+        hidden = np.ctypeslib.as_array(hidden_ptr, shape=(1, hidden_dim))[0].copy()
         
         self.cur_pos += 1
         return hidden

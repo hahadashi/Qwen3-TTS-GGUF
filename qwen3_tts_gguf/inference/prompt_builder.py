@@ -5,6 +5,7 @@ import time
 import numpy as np
 from typing import Optional, List, Union
 from .constants import PROTOCOL
+from . import logger
 
 class PromptData:
     """包装构建好的 Prompt Embedding 数据"""
@@ -50,6 +51,7 @@ class PromptBuilder:
     def build_clone_prompt(text: str, tokenizer, assets, voice, lang_id: int = None) -> PromptData:
         """[声音克隆入口] 采用特征叠加 (Fusion) 协议 - 完美对齐官方逻辑"""
         t_start = time.time()
+        logger.info(f"[PromptBuilder] 开始构建克隆提示词: text='{text[:20]}...'")
         
         p = PROTOCOL
         # 1. 构造官方切片的 Text ID 序列
@@ -62,21 +64,29 @@ class PromptBuilder:
         # 最终文本池 = Ref Slice + Target Slice + EOS
         full_text_ids = ref_id_slice + target_id_slice + [p['EOS_TOKEN']] 
         text_pool = assets.text_table[full_text_ids]
+        logger.info(f"[PromptBuilder] 文本池构建完成: ids={len(full_text_ids)}, shape={text_pool.shape}")
         
         # 2. 构造音频池 (Codec_BOS + Codes_Sum)
         codes = voice.codes
         audio_vectors = []
         audio_vectors.append(assets.emb_tables[0][2149]) # Codec BOS
+        
+        # 动态获取隐藏层维度
+        hidden_dim = text_pool.shape[1]
+        logger.info(f"[PromptBuilder] 检测到目标隐藏层维度: {hidden_dim}")
+
         for t in range(codes.shape[0]):
-            step_sum = np.zeros(2048, dtype=np.float32)
+            step_sum = np.zeros(hidden_dim, dtype=np.float32)
             for q in range(16):
                 step_sum += assets.emb_tables[q][codes[t, q]]
             audio_vectors.append(step_sum)
-        audio_pool = np.array(audio_vectors) # (T2, 2048)
+        audio_pool = np.array(audio_vectors) # (T2, hidden_dim)
+        logger.info(f"[PromptBuilder] 音频池构建完成: shape={audio_pool.shape}")
 
         # 3. 文本和音频融合
         t_len = len(text_pool)
         a_len = len(audio_pool)
+        logger.info(f"[PromptBuilder] 融合开始: t_len={t_len}, a_len={a_len}")
         
         if t_len > a_len:
             # 文本更长：融合前 a_len，剩下的作为 trailing
@@ -86,10 +96,12 @@ class PromptBuilder:
             # 音频更长：文本补 Pad
             pad_seq = np.tile(assets.tts_pad, (a_len - t_len, 1))
             text_pool_padded = np.vstack([text_pool, pad_seq])
+            logger.info(f"[PromptBuilder] 文本补齐后 shape={text_pool_padded.shape}")
             icl_fused = text_pool_padded + audio_pool
             trailing_text = None
 
         # 4. 构建前缀
+        logger.info("[PromptBuilder] 开始构建前缀 (Prefix)...")
         prefix = []
 
         # Role: <|im_start|>, assistant, \n 
@@ -102,24 +114,33 @@ class PromptBuilder:
             prefill_ids = [p['THINK'], p['THINK_BOS'], lang_id, p['THINK_EOS']] 
         else: 
             prefill_ids = [p['THINK'], p['THINK_BOS'], p['THINK_EOS']]
+            
         for tid in prefill_ids:
-            prefix.append(tts_pad + assets.emb_tables[0][tid])
+            vec_a = tts_pad
+            vec_b = assets.emb_tables[0][tid]
+            # logger.info(f" Prefill Fusion: pad={vec_a.shape}, emb={vec_b.shape}")
+            prefix.append(vec_a + vec_b)
         
         # Speaker
-        prefix.append(tts_pad + voice.spk_emb)
+        vec_spk = voice.spk_emb
+        # logger.info(f" Speaker Fusion: pad={tts_pad.shape}, spk={vec_spk.shape}")
+        prefix.append(tts_pad + vec_spk)
         
         # BOS
-        bos_text = assets.text_table[p['BOS_TOKEN']]
-        prefix.append(bos_text + assets.emb_tables[0][p['PAD']])
+        vec_bos_text = assets.text_table[p['BOS_TOKEN']]
+        vec_pad_codec = assets.emb_tables[0][p['PAD']]
+        # logger.info(f" BOS Fusion: text={vec_bos_text.shape}, codec={vec_pad_codec.shape}")
+        prefix.append(vec_bos_text + vec_pad_codec)
         
-
         # 5. 组装
         initial_prompt = np.vstack([np.array(prefix), icl_fused])
-        initial_prompt = initial_prompt.reshape(1, len(initial_prompt), 2048).astype(np.float32)
+        initial_prompt = initial_prompt.reshape(1, len(initial_prompt), hidden_dim).astype(np.float32)
+        logger.info(f"[PromptBuilder] 初始 Prompt 组装完成: shape={initial_prompt.shape}")
         
         trailing_text_np = None
         if trailing_text is not None and len(trailing_text) > 0:
-            trailing_text_np = trailing_text.reshape(1, len(trailing_text), 2048).astype(np.float32)
+            trailing_text_np = trailing_text.reshape(1, len(trailing_text), hidden_dim).astype(np.float32)
+            logger.info(f"[PromptBuilder] Trailing Text 组装完成: shape={trailing_text_np.shape}")
 
         return PromptData(
             embd=initial_prompt,

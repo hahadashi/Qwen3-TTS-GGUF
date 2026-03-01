@@ -47,8 +47,10 @@ class TTSStream:
         self.talker_ctx = llama.LlamaContext(self.engine.talker_model, n_ctx=self.n_ctx, embeddings=True)
         self.predictor_ctx = llama.LlamaContext(self.engine.predictor_model, n_ctx=64, embeddings=False)
         
-        self.talker_batch = llama.LlamaBatch(self.n_ctx, embd_dim=2048)
-        self.predictor_batch = llama.LlamaBatch(2, embd_dim=1024)
+        # 使用模型自带的 n_embd，兼容 0.6B(1024) 和 1.7B(2048)
+        logger.info(f"[Stream] Talker Dim: {self.engine.talker_model.n_embd} | Predictor Dim: {self.engine.predictor_model.n_embd}")
+        self.talker_batch = llama.LlamaBatch(self.n_ctx, embd_dim=self.engine.talker_model.n_embd)
+        self.predictor_batch = llama.LlamaBatch(2, embd_dim=self.engine.predictor_model.n_embd)
 
     # =========================================================================
     # 核心推理 API
@@ -192,18 +194,27 @@ class TTSStream:
         turn_summed_embeds = []
         chunk_buffer = []
         
+        logger.info(f"[Stream] 启动推理循环: max_steps={cfg.max_steps}, streaming={streaming}")
+        
         if self.decoder:
-            pass # 信任 Session 自动清理逻辑
+            logger.info("[Stream] 检测到解码器，准备流式输出")
             
+        step_count = 0
         for step_codes, summed_vec in self._run_engine_loop_gen(pdata, cfg, timing):
+            step_count += 1
             all_codes.append(step_codes) # 保持 numpy 状态，供 decoder 使用
             turn_summed_embeds.append(summed_vec)
             
+            if step_count % 50 == 0:
+                logger.info(f"[Stream] 正在生成... 已完成 {step_count} 步")
+
             if streaming and self.decoder:
                 chunk_buffer.append(step_codes)
                 if len(chunk_buffer) >= chunk_size:
                     self.decoder.decode(np.array(chunk_buffer), is_final=False, stream=True)
                     chunk_buffer = []
+
+        logger.info(f"[Stream] 推理循环结束，共 {step_count} 步")
 
         if streaming and self.decoder:
             self.decoder.decode(np.array(chunk_buffer) if chunk_buffer else np.zeros((0, 16)), is_final=True, stream=True)
