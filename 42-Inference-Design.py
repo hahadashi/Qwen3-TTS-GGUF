@@ -29,7 +29,6 @@ def main():
         text=TARGET_TEXT,
         instruct=INSTRUCT,
         streaming=True,
-        verbose=True, 
         config=config, 
         chunk_size=8,
     )

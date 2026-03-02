@@ -63,8 +63,7 @@ class TTSStream:
               language: str = "chinese",
               config: Optional[TTSConfig] = None,
               streaming: bool = False,
-              chunk_size: int = 8,
-              verbose: bool = True) -> Optional[TTSResult]:
+              chunk_size: int = 8) -> Optional[TTSResult]:
         """
         [克隆模式] 使用当前流中已设定的音色锚点（Voice Anchor）进行语音合成。
 
@@ -77,7 +76,6 @@ class TTSStream:
             config: 推理配置对象 (TTSConfig)，可控制 Temperature, Top-P 等采样参数。
             streaming: 是否启用流式推理。若为 True，则边推理边向播放器推送数据。
             chunk_size: 流式推理时，每积压多少帧特征码即送去解码播放一次。越小延迟越低，但每次解码会有8帧的额外计算。
-            verbose: 是否输出详细推理进度和时延统计。
 
         Returns:
             TTSResult 对象，包含完整音频、特征码及性能统计。
@@ -96,7 +94,7 @@ class TTSStream:
             timing = Timing()
             timing.prompt_time = pdata.compile_time
             
-            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size, verbose=verbose)
+            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size)
             
             return self._post_process(text, pdata, lout)
         except Exception as e:
@@ -111,8 +109,7 @@ class TTSStream:
                instruct: Optional[str] = None,
                config: Optional[TTSConfig] = None,
                streaming: bool = False,
-               chunk_size: int = 8,
-               verbose: bool = True) -> Optional[TTSResult]:
+               chunk_size: int = 8) -> Optional[TTSResult]:
         """
         [精品音色模式] 使用官方内置的精品预设音色进行合成，支持自然语言渲染指令。
 
@@ -127,7 +124,6 @@ class TTSStream:
             config: 推理配置对象 (TTSConfig)。
             streaming: 是否启用流式推理。
             chunk_size: 流式推理块大小。
-            verbose: 是否输出详细进度。
 
         Returns:
             TTSResult 对象。
@@ -143,7 +139,7 @@ class TTSStream:
             timing = Timing()
             timing.prompt_time = pdata.compile_time
             
-            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size, verbose=verbose)
+            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size)
             return self._post_process(text, pdata, lout)
         except Exception as e:
             logger.error(f"❌ Custom 推理失败: {e}", exc_info=True)
@@ -155,8 +151,7 @@ class TTSStream:
                language: str = "chinese",
                config: Optional[TTSConfig] = None,
                streaming: bool = False,
-               chunk_size: int = 8,
-               verbose: bool = True) -> Optional[TTSResult]:
+               chunk_size: int = 8) -> Optional[TTSResult]:
         """
         [音色设计模式] 完全通过自然语言描述来设计并生成一个全新的音色。
 
@@ -167,7 +162,6 @@ class TTSStream:
             config: 推理配置对象 (TTSConfig)。
             streaming: 是否启用流式推理。
             chunk_size: 流式推理块大小。
-            verbose: 是否输出详细进度。
 
         Returns:
             TTSResult 对象。
@@ -182,7 +176,7 @@ class TTSStream:
             timing = Timing()
             timing.prompt_time = pdata.compile_time
             
-            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size, verbose=verbose)
+            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size)
             return self._post_process(text, pdata, lout)
         except Exception as e:
             logger.error(f"❌ Design 推理失败: {e}", exc_info=True)
@@ -192,7 +186,7 @@ class TTSStream:
         return self.clone(*args, **kwargs)
 
     def _run_engine_loop(self, pdata: PromptData, timing: Timing, cfg: TTSConfig, 
-                         streaming: bool = False, chunk_size: int = 8, verbose: bool = False) -> LoopOutput:
+                         streaming: bool = False, chunk_size: int = 8) -> LoopOutput:
         all_codes = []
         turn_summed_embeds = []
         chunk_buffer = []
@@ -456,7 +450,7 @@ class TTSStream:
         """从内置说话人生成音色锚点并设置"""
         try:
             logger.info(f"📍 正在从内置说话人初始化音色核心: {speaker_id}")
-            # kwargs 包含 language, streaming, verbose 等
+            # kwargs 包含 language, streaming 等
             res = self.custom(text, speaker_id, **kwargs)
             if res:
                 self._set_voice_from_result(res)

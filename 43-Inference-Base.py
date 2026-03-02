@@ -48,7 +48,6 @@ def main():
         text=target_text, 
         language='Chinese', 
         streaming=True,
-        verbose=True, 
         config=config, 
         chunk_size=8,
     )

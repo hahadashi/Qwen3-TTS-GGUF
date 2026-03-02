@@ -33,7 +33,6 @@ def main():
         instruct=INSTRUCT,
         language='chinese',
         streaming=True,
-        verbose=True, 
         config=config, 
         chunk_size=8,
     )
