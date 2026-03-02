@@ -19,16 +19,19 @@ def main():
     print("🚀 [Base-Clone] 正在初始化 TTS 引擎...")
     engine = TTSEngine(model_dir="model-base")
     stream = engine.create_stream()
+
+    # 确保输出目录存在
+    os.makedirs("./output/design", exist_ok=True)
     
     # 设置音色锚点
 
     # 读取音频文件，需要编码为 Code，是有损克隆
-    # REF_AUDIO = "output/sample.wav"                
+    # REF_AUDIO = "output/elaborate/sample.wav"                
     # REF_TEXT = "你好，我是千问，你今天过得好吗？"
     # stream.set_voice(REF_AUDIO, REF_TEXT)
 
     # 从 json 读取 code，无需从 wav 编码，可以无损克隆
-    REF_JSON = "output/sample.json"           
+    REF_JSON = "output/elaborate/sample.json"           
     stream.set_voice(REF_JSON)
     
     
@@ -58,11 +61,14 @@ def main():
         config=config, 
     )
     result.print_stats()
+
+    text_prefix = "".join(c for c in target_text.strip() if c not in r'<>:"/\|?*')[:20].strip()
+    save_path = f"./output/clone/{text_prefix}"
+    result.save(f"{save_path}.wav")     # 保存为音频
+    result.save(f"{save_path}.json")    # 保存为json，内含无损的音频code
+
     stream.join()
-
-    result.save("./output/clone_result.wav")     # 保存为音频
-    result.save("./output/clone_result.json")    # 保存为json，内含无损的音频code
-
+    
     engine.shutdown()
 
 if __name__ == "__main__":
