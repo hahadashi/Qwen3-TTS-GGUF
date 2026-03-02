@@ -125,6 +125,15 @@ def interactive_session():
                 continue
 
             # --- 标准合成 (Clone 模式) ---
+            if not stream.voice:
+                print("⚠️  提示: 当前尚未设定音色锚点，无法直接进行克隆合成。")
+                print("   你可以执行以下操作之一来设定音色:")
+                print("   1. [内置音色] /custom <文本> <人名> - 使用内置发音人")
+                print("   2. [设计声音] /design <文本> <指令> - 根据描述造人")
+                print("   3. [克隆模式] /load <json路径> - 加载已有的音色存档")
+                print("   4. [克隆模式] /voice <人名> <语言> <文本> - 提取参考音频的音色")
+                continue
+
             try:
                 print("🎤 正在流式合成...")
                 last_result = stream.clone(raw_input, config=cfg)
