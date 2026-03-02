@@ -27,3 +27,5 @@ class TTSConfig:
     
     # --- 全局生成控制 ---
     max_steps: int = 300             # 最大生成步数。决定了单次合成最长的持续时间。
+    streaming: bool = True           # 是否启用流式推理。
+    chunk_size: int = 8              # 流式推理块大小（帧数）。

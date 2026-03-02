@@ -26,15 +26,21 @@ def main():
 
     # 3. 进行推理 (调用 custom 模式)
     print(f"🎭 正在合成...")
-    config = TTSConfig(max_steps=400, temperature=0.6, sub_temperature=0.6, seed=42, sub_seed=45)
+    config = TTSConfig(
+        max_steps=400, 
+        temperature=0.6, 
+        sub_temperature=0.6, 
+        seed=42, 
+        sub_seed=45,
+        streaming=True,
+        chunk_size=8
+    )
     result = stream.custom(
         text=TARGET_TEXT,
         speaker=SPEAKER,
         instruct=INSTRUCT,
         language='chinese',
-        streaming=True,
         config=config, 
-        chunk_size=8,
     )
     result.print_stats()
     stream.join()

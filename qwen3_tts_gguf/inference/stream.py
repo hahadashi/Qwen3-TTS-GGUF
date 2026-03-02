@@ -61,18 +61,16 @@ class TTSStream:
     def clone(self, 
               text: str, 
               language: str = "chinese",
-              config: Optional[TTSConfig] = None,
-              streaming: bool = False,
-              chunk_size: int = 8) -> Optional[TTSResult]:
+              config: Optional[TTSConfig] = None) -> Optional[TTSResult]:
         """
         [克隆模式] 使用当前流中已设定的音色锚点（Voice Anchor）进行语音合成。
 
         Args:
             text: 待合成的目标文本。
             language: 目标语言。可选:
-                - 'chinese' (默认), 'english', 'japanese', 'korean'
+                - 'chinese' , 'english', 'japanese', 'korean'
                 - 'german', 'spanish', 'french', 'russian', 'italian', 'portuguese'
-                - 'beijing_dialect' (北京话), 'sichuan_dialect' (四川话)
+                - 'beijing_dialect' , 'sichuan_dialect' 
             config: 推理配置对象 (TTSConfig)，可控制 Temperature, Top-P 等采样参数。
             streaming: 是否启用流式推理。若为 True，则边推理边向播放器推送数据。
             chunk_size: 流式推理时，每积压多少帧特征码即送去解码播放一次。越小延迟越低，但每次解码会有8帧的额外计算。
@@ -94,7 +92,7 @@ class TTSStream:
             timing = Timing()
             timing.prompt_time = pdata.compile_time
             
-            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size)
+            lout = self._run_engine_loop(pdata, timing, cfg)
             
             return self._post_process(text, pdata, lout)
         except Exception as e:
@@ -107,19 +105,19 @@ class TTSStream:
                speaker: str,
                language: str = "chinese",
                instruct: Optional[str] = None,
-               config: Optional[TTSConfig] = None,
-               streaming: bool = False,
-               chunk_size: int = 8) -> Optional[TTSResult]:
+               config: Optional[TTSConfig] = None) -> Optional[TTSResult]:
         """
-        [精品音色模式] 使用官方内置的精品预设音色进行合成，支持自然语言渲染指令。
+        [内置音色模式] 使用官方内置的预设音色进行合成，支持自然语言渲染指令。
 
         Args:
             text: 待合成的目标文本。
-            speaker: 精品音色名称。可选:
-                - 女性: 'vivian', 'serena', 'ono_anna', 'sohee'
-                - 男性: 'ryan', 'aiden', 'uncle_fu'
-                - 方言专用: 'eric' (四川话男声), 'dylan' (北京话男声)
-            language: 目标语言 (见 clone 方法)。
+            speaker: 内置音色名称。可选:
+                - 女性: ['Vivian', 'Serena', 'Ono_Anna', 'Sohee']
+                - 男性: ['Ryan', 'Aiden', 'Uncle_Fu', 'Eric', 'Dylan']
+            language: 目标语言。可选:
+                - 'chinese' , 'english', 'japanese', 'korean'
+                - 'german', 'spanish', 'french', 'russian', 'italian', 'portuguese'
+                - 'beijing_dialect' , 'sichuan_dialect' 
             instruct: 渲染指令，如 "用温柔的语气说" 或 "充满活力的播报"。
             config: 推理配置对象 (TTSConfig)。
             streaming: 是否启用流式推理。
@@ -139,7 +137,7 @@ class TTSStream:
             timing = Timing()
             timing.prompt_time = pdata.compile_time
             
-            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size)
+            lout = self._run_engine_loop(pdata, timing, cfg)
             return self._post_process(text, pdata, lout)
         except Exception as e:
             logger.error(f"❌ Custom 推理失败: {e}", exc_info=True)
@@ -149,16 +147,17 @@ class TTSStream:
                text: str,
                instruct: str,
                language: str = "chinese",
-               config: Optional[TTSConfig] = None,
-               streaming: bool = False,
-               chunk_size: int = 8) -> Optional[TTSResult]:
+               config: Optional[TTSConfig] = None) -> Optional[TTSResult]:
         """
         [音色设计模式] 完全通过自然语言描述来设计并生成一个全新的音色。
 
         Args:
             text: 待合成的目标文本。
             instruct: 音色设计描述。例如："体现撒娇稚嫩的萝莉女声，音调偏高且起伏明显。"
-            language: 目标语言 (见 clone 方法)。
+            language: 目标语言。可选:
+                - 'chinese' , 'english', 'japanese', 'korean'
+                - 'german', 'spanish', 'french', 'russian', 'italian', 'portuguese'
+                - 'beijing_dialect' , 'sichuan_dialect' 
             config: 推理配置对象 (TTSConfig)。
             streaming: 是否启用流式推理。
             chunk_size: 流式推理块大小。
@@ -176,7 +175,7 @@ class TTSStream:
             timing = Timing()
             timing.prompt_time = pdata.compile_time
             
-            lout = self._run_engine_loop(pdata, timing, cfg, streaming=streaming, chunk_size=chunk_size)
+            lout = self._run_engine_loop(pdata, timing, cfg)
             return self._post_process(text, pdata, lout)
         except Exception as e:
             logger.error(f"❌ Design 推理失败: {e}", exc_info=True)
@@ -185,8 +184,9 @@ class TTSStream:
     def tts(self, *args, **kwargs):
         return self.clone(*args, **kwargs)
 
-    def _run_engine_loop(self, pdata: PromptData, timing: Timing, cfg: TTSConfig, 
-                         streaming: bool = False, chunk_size: int = 8) -> LoopOutput:
+    def _run_engine_loop(self, pdata: PromptData, timing: Timing, cfg: TTSConfig) -> LoopOutput:
+        streaming = cfg.streaming
+        chunk_size = cfg.chunk_size
         all_codes = []
         turn_summed_embeds = []
         chunk_buffer = []
