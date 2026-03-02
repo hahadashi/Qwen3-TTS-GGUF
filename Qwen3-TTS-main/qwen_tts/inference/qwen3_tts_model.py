@@ -815,14 +815,14 @@ class Qwen3TTSModel:
         self._validate_languages(languages)
         self._validate_speakers(speakers)
 
-        input_ids = self._tokenize_texts([self._build_assistant_text(t) for t in texts])
+        input_ids = self._tokenize_texts([self._build_assistant_text(t) for t in texts])  # '<|im_start|>assistant\nShe said she would be here by noon.<|im_end|>\n<|im_start|>assistant\n'
 
         instruct_ids: List[Optional[torch.Tensor]] = []
         for ins in instructs:
             if ins is None or ins == "":
                 instruct_ids.append(None)
             else:
-                instruct_ids.append(self._tokenize_texts([self._build_instruct_text(ins)])[0])
+                instruct_ids.append(self._tokenize_texts([self._build_instruct_text(ins)])[0])  # '<|im_start|>user\nspoke with a very sad and tearful voice.<|im_end|>\n'
 
         gen_kwargs = self._merge_generate_kwargs(**kwargs)
 

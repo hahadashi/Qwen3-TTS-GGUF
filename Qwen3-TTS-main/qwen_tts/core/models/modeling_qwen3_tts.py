@@ -2124,7 +2124,7 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
             tts_bos_embed, tts_eos_embed, tts_pad_embed = self.talker.text_projection(
                 self.talker.get_text_embeddings()(
                     torch.tensor(
-                        [[self.config.tts_bos_token_id, self.config.tts_eos_token_id, self.config.tts_pad_token_id]],
+                        [[self.config.tts_bos_token_id, self.config.tts_eos_token_id, self.config.tts_pad_token_id]],   # 151672  151673  151671
                         device=self.talker.device,
                         dtype=input_id.dtype,
                     )
@@ -2139,21 +2139,21 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
                                         self.config.talker_config.codec_think_eos_id,
                                     ]]
             else:
-                codec_prefill_list = [[
+                codec_prefill_list = [[  # think think_bos langguage_id think_eos
                                         self.config.talker_config.codec_think_id,
                                         self.config.talker_config.codec_think_bos_id,
                                         language_id,
                                         self.config.talker_config.codec_think_eos_id,
                                     ]]
 
-            codec_input_emebdding_0 = self.talker.get_input_embeddings()(
+            codec_input_emebdding_0 = self.talker.get_input_embeddings()(   # think think_bos langguage_id think_eos
                                                     torch.tensor(
                                                         codec_prefill_list,
                                                         device=self.talker.device,
                                                         dtype=input_id.dtype,
                                                     )
                                                 )
-            codec_input_emebdding_1 = self.talker.get_input_embeddings()(
+            codec_input_emebdding_1 = self.talker.get_input_embeddings()(   # codec_pad codec_bos
                                                     torch.tensor(
                                                         [[
                                                             self.config.talker_config.codec_pad_id,
@@ -2164,26 +2164,26 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
                                                     )
                                                 )
             if speaker_embed is None:
-                codec_input_emebdding = torch.cat([codec_input_emebdding_0,
-                                                   codec_input_emebdding_1], dim=1)
+                codec_input_emebdding = torch.cat([codec_input_emebdding_0,             # think think_bos langguage_id think_eos
+                                                   codec_input_emebdding_1], dim=1)     # codec_pad codec_bos
             else:
-                codec_input_emebdding = torch.cat([codec_input_emebdding_0,
-                                                   speaker_embed.view(1, 1, -1),
-                                                   codec_input_emebdding_1], dim=1)
+                codec_input_emebdding = torch.cat([codec_input_emebdding_0,             # think think_bos langguage_id think_eos
+                                                   speaker_embed.view(1, 1, -1),        # speaker_embd
+                                                   codec_input_emebdding_1], dim=1)     # codec_pad codec_bos
 
             # '<|im_start|>assistant\n我叫通义千问，是阿里云的开源大模型。<|im_end|>\n<|im_start|>assistant\n'
 
             # <|im_start|>assistant\n
             _talker_input_embed_role = self.talker.text_projection(
-                                        self.talker.get_text_embeddings()(input_id[:, :3])
+                                        self.talker.get_text_embeddings()(input_id[:, :3])          # <|im_start|> assistant \n
                                         )
 
             # tts_pad * 4 + tts_bos
-            _talker_input_embed = torch.cat((tts_pad_embed.expand(-1, codec_input_emebdding.shape[1] - 2, -1),
-                                            tts_bos_embed,
-                                            ), dim=1) + codec_input_emebdding[:, :-1]
+            _talker_input_embed = torch.cat((tts_pad_embed.expand(-1, codec_input_emebdding.shape[1] - 2, -1),  # tts_pad   tts_pad     tts_pad         tts_pad     tts_bos
+                                            tts_bos_embed,                                                      
+                                            ), dim=1) + codec_input_emebdding[:, :-1]                           # think     think_bos   langguage_id    think_eos   codec_pad
 
-            talker_input_embed = torch.cat((_talker_input_embed_role, _talker_input_embed), dim=1)
+            talker_input_embed = torch.cat((_talker_input_embed_role, _talker_input_embed), dim=1)   # <|im_start| assistant \n  【think     think_bos   langguage_id    think_eos   codec_pad】 +   【tts_pad   tts_pad     tts_pad         tts_pad     tts_bos】
 
             if voice_clone_prompt is not None and voice_clone_prompt["ref_code"] is not None and voice_clone_prompt["icl_mode"][index]:
                 icl_input_embed, trailing_text_hidden = self.generate_icl_prompt(
@@ -2196,10 +2196,10 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
                 )
                 talker_input_embed = torch.cat([talker_input_embed, icl_input_embed], dim=1)
             else:
-                #  tts_text_first_token
-                talker_input_embed = torch.cat([talker_input_embed, 
-                                                self.talker.text_projection(self.talker.get_text_embeddings()(input_id[:, 3:4])) + codec_input_emebdding[:, -1:]], 
-                                                dim=1)
+                #  tts_text_first_token            # input_id = '<|im_start|>assistant\nShe said she would be here by noon.<|im_end|>\n<|im_start|>assistant\n'
+                talker_input_embed = torch.cat([talker_input_embed,         # <|im_start| assistant \n  【tts_pad tts_pad tts_pad tts_pad tts_bos】+【think think_bos langguage_id think_eos codec_pad】
+                                                self.talker.text_projection(self.talker.get_text_embeddings()(input_id[:, 3:4])) + codec_input_emebdding[:, -1:]],  # 【she】 + 【codec_bos】
+                                                dim=1)  
                 if non_streaming_mode:
                     talker_input_embed = talker_input_embed[:, :-1] # 去掉原本放进去的text
                     talker_input_embed = torch.cat([talker_input_embed,
@@ -2230,7 +2230,7 @@ class Qwen3TTSForConditionalGeneration(Qwen3TTSPreTrainedModel, GenerationMixin)
                     trailing_text_hidden = torch.cat((self.talker.text_projection(
                                                         self.talker.get_text_embeddings()(input_id[:, 4:-5])
                                                     ), tts_eos_embed), dim=1)
-            talker_input_embeds[index].append(talker_input_embed)
+            talker_input_embeds[index].append(talker_input_embed)  # <|im_start|>user\nspoke with a very sad and tearful voice.<|im_end|>\n # <|im_start| assistant \n  【tts_pad tts_pad tts_pad tts_pad tts_bos】+【think think_bos langguage_id think_eos codec_pad】  【文本 tts_eos】+【codec_pad codec_pad】  【tts_pad】+【codec_bos】
             trailing_text_hiddens.append(trailing_text_hidden)
         
         for index, talker_input_embed in enumerate(talker_input_embeds):
