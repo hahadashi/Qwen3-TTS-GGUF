@@ -45,7 +45,7 @@ def main():
     # 流式模式下，clone 依然会返回完整 result，但播放是并发进行的
     print(f"\n🎙️  [2/2] 开始流式推理 (边推边播)...")
     target_text = "你今天过得好吗？"
-    config = TTSConfig(max_steps=400, temperature=0.6, sub_temperature=0.6, seed=45)
+    config = TTSConfig(max_steps=400, temperature=0.6, sub_temperature=0.6, seed=42, sub_seed=45)
     # config = TTSConfig(max_steps=400, do_sample=False, sub_do_sample=False)
     result = stream.clone(
         text=target_text, 
