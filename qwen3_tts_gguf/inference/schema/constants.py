@@ -50,12 +50,25 @@ NUM_QUANTIZERS = 16
 # 采样率
 SAMPLE_RATE = 24000
 
+from . import logger
+
 def map_speaker(spk) -> int:
-    """将说话人名称或 ID 映射为官方数值 ID"""
-    if isinstance(spk, int): return spk
-    return SPEAKER_MAP.get(str(spk).lower(), 3065)
+    """将说话人名称或 ID 映射为官方数值 ID (2800-3071)"""
+    if isinstance(spk, int):
+        # 即使是数字，也要验证区间
+        if 2800 <= spk <= 3071:
+            return spk
+        logger.warning(f"⚠️ 非法的 Speaker ID: {spk}, 必须在 2800-3071 之间。回退到默认对齐 Vivian (3065)")
+        return None
+    
+    return SPEAKER_MAP.get(str(spk).lower(), None)
 
 def map_language(lang) -> int:
-    """将语言名称或 ID 映射为官方数值 ID"""
-    if isinstance(lang, int): return lang
+    """将语言名称或 ID 映射为官方数值 ID (2048-2147)"""
+    if isinstance(lang, int):
+        if 2048 <= lang <= 2147:
+            return lang
+        logger.warning(f"⚠️ 非法的 Language ID: {lang}, 必须在 2048-2147 之间。回退到 Chinese (2055)")
+        return None
+        
     return LANGUAGE_MAP.get(str(lang).lower(), None)

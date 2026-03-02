@@ -138,6 +138,7 @@ class PromptBuilder:
             prefix.append(tts_pad + self.assets.emb_tables[0][tid])
 
         # 2d. 说话人
+        cur_spk_emb = None
         if spk_emb is not None:
             cur_spk_emb = spk_emb
         elif spk_id is not None:
