@@ -49,7 +49,20 @@ class PromptBuilder:
 
     @staticmethod
     def build_clone_prompt(text: str, tokenizer, assets, voice, lang_id: int = None) -> PromptData:
-        """[声音克隆入口] 采用特征叠加 (Fusion) 协议 - 完美对齐官方逻辑"""
+        """
+        [声音克隆入口] 采用特征叠加 (Fusion) 协议 - 完美对齐官方逻辑
+
+        <|im_start|>assistant\n  
+
+        【tts_pad × 3~4】                       +       【think think_bos [lang_id] think_eos】  
+        【tts_pad】                             +       【spk_emb】
+
+        【tts_bos】                             +       【codec_pad】
+        【参】                                  +       【codec_bos】
+        【考文本+目标文本】                       +       【参】
+        【tts_eos】                             +       【考】
+        【tts_pad】                             +       【音频】
+        """
         t_start = time.time()
         logger.info(f"[PromptBuilder] 开始构建克隆提示词: text='{text[:20]}...'")
         
@@ -62,14 +75,14 @@ class PromptBuilder:
         target_id_slice = target_full_ids[3:-5]
         
         # 最终文本池 = Ref Slice + Target Slice + EOS
-        full_text_ids = ref_id_slice + target_id_slice + [p['EOS_TOKEN']] 
+        full_text_ids = ref_id_slice + target_id_slice + [p['TTS_EOS']] 
         text_pool = assets.text_table[full_text_ids]
         logger.info(f"[PromptBuilder] 文本池构建完成: ids={len(full_text_ids)}, shape={text_pool.shape}")
         
         # 2. 构造音频池 (Codec_BOS + Codes_Sum)
         codes = voice.codes
         audio_vectors = []
-        audio_vectors.append(assets.emb_tables[0][2149]) # Codec BOS
+        audio_vectors.append(assets.emb_tables[0][p['BOS']]) # Codec BOS
         
         # 动态获取隐藏层维度
         hidden_dim = text_pool.shape[1]
@@ -127,7 +140,7 @@ class PromptBuilder:
         prefix.append(tts_pad + vec_spk)
         
         # BOS
-        vec_bos_text = assets.text_table[p['BOS_TOKEN']]
+        vec_bos_text = assets.text_table[p['TTS_BOS']]
         vec_pad_codec = assets.emb_tables[0][p['PAD']]
         # logger.info(f" BOS Fusion: text={vec_bos_text.shape}, codec={vec_pad_codec.shape}")
         prefix.append(vec_bos_text + vec_pad_codec)
@@ -154,7 +167,24 @@ class PromptBuilder:
     @staticmethod
     def _build_core(text: str, tokenizer, assets, lang_id: Optional[int], spk_id: Optional[int] = None, 
                     spk_emb: Optional[np.ndarray] = None, instruct: Optional[str] = None) -> PromptData:
-        """[基础生成构造器]"""
+        """
+        [基础生成构造器]
+
+
+        <|im_start|>user\n这里是指令<|im_end|>
+        <|im_start| assistant \n  
+
+        【tts_pad tts_pad tts_pad tts_pad 】    +       【think think_bos langguage_id think_eos 】  
+        【tts_pad】                             +       【spk_embd】
+
+        【tts_bos】                             +       【codec_pad】
+        【目标文本】                             +       【codec_pad】
+        【tts_eos】                             +       【codec_pad】
+
+        【tts_pad】                             +       【codec_bos】
+        
+        """
+
         t_start = time.time()
         p = PROTOCOL
         prefix = []
@@ -169,35 +199,69 @@ class PromptBuilder:
         for tid in target_full_ids[:3]:
             prefix.append(assets.text_table[tid])
             
-        # 3. 控制块
-        pad = assets.tts_pad
-        prefill_ids = [2154, 2156, lang_id or 2055, 2157]
+        # 3. 语言
+        tts_pad = assets.tts_pad
+        if lang_id and lang_id in range(2048, 2147): 
+            prefill_ids = [p['THINK'], p['THINK_BOS'], lang_id, p['THINK_EOS']] 
+        else: 
+            prefill_ids = [p['THINK'], p['THINK_BOS'], p['THINK_EOS']]
         for tid in prefill_ids:
-            prefix.append(pad + assets.emb_tables[0][tid])
-            
-        cur_spk_emb = spk_emb if spk_emb is not None else assets.emb_tables[0][spk_id or p["SPK"]]
-        prefix.append(pad + cur_spk_emb)
+            prefix.append(tts_pad + assets.emb_tables[0][tid])
+
+        # 4. 说话人
+        if spk_emb is not None:
+            cur_spk_emb = spk_emb
+        elif spk_id is not None:
+            cur_spk_emb = assets.emb_tables[0][spk_id]
+        else:
+            cur_spk_emb = None
+        if cur_spk_emb is not None:
+            prefix.append(tts_pad + cur_spk_emb)
         
-        # 4. Prefill 结束位与首字融合
-        bos_text = assets.text_table[151672]
-        # 基础模式下，首部直接连 text
-        # 官方逻辑 L2201: text_projection(hidden(input_id[:,3:4])) + codec_bos
-        prefix.append(bos_text + assets.emb_tables[0][2148])
+        # 5. 文本开始
+        bos_text = assets.text_table[p['TTS_BOS']]
+        bos_text_embd = bos_text + assets.emb_tables[0][p['PAD']]
         
-        # 5. 文本池处理
-        # 剩下部分入 Trailing。切片为 [3:-5] 后接 EOS
+        # 6. 正文
         target_id_slice = target_full_ids[3:-5]
-        full_ids = target_id_slice + [151643]
-        
-        text_pool = assets.text_table[full_ids]
-        trailing_text_np = text_pool.reshape(1, len(text_pool), 2048).astype(np.float32)
+        text_pool = assets.text_table[target_id_slice]
+
+        # 7. 文本结束
+        eos_text = assets.text_table[p['TTS_EOS']]
+        eos_text_embd = eos_text + assets.emb_tables[0][p['PAD']]
+
+        # 8. 说话开始
+        bos = tts_pad + assets.emb_tables[0][p['BOS']]
+
+        # ==================== 非流式组装 ====================
+        # 动态获取隐藏层维度
+        hidden_dim = text_pool.shape[1] if len(text_pool) > 0 else tts_pad.shape[0]
+        codec_pad = assets.emb_tables[0][p['PAD']]
+
+        # 正文：每个文本 token 都叠加 codec_pad
+        if len(text_pool) > 0:
+            text_fused = text_pool + codec_pad  # 广播: (T, D) + (D,) -> (T, D)
+        else:
+            text_fused = np.empty((0, hidden_dim), dtype=np.float32)
+
+        # Initial Prompt = Prefix + BOS + 正文(fused) + EOS + Codec_BOS
+        body = [
+            np.array(prefix), 
+            bos_text_embd.reshape(1, -1), 
+            text_fused, 
+            eos_text_embd.reshape(1, -1), 
+            bos.reshape(1, -1)
+        ]
+        initial_prompt = np.vstack(body)
+        initial_prompt = initial_prompt.reshape(1, len(initial_prompt), hidden_dim).astype(np.float32)
+        logger.info(f"[PromptBuilder] 初始 Prompt 组装完成 (非流式): shape={initial_prompt.shape}")
+
 
         return PromptData(
-            embd=np.array(prefix).reshape(1, len(prefix), 2048).astype(np.float32),
+            embd=initial_prompt,
             text=text,
             text_ids=target_id_slice,
             spk_emb=cur_spk_emb,
-            trailing_text_embd=trailing_text_np,
+            trailing_text_embd=None,  # 非流式：文本已全部在 prompt 中，无需步进注入
             compile_time=time.time() - t_start
         )
-
