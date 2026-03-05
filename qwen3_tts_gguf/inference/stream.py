@@ -15,7 +15,7 @@ from .predictor import Predictor
 
 from . import llama, logger
 from .prompt_builder import PromptBuilder, PromptData
-from .utils.audio import preprocess_audio, save_temp_wav
+from .utils.audio import load_audio
 
 class TTSStream:
     """
@@ -437,7 +437,7 @@ class TTSStream:
         logger.info(f"🎤 正在从音频提取音色特征: {wav_path.name}")
         
         # 1. 万能格式转换与预处理 (24kHz, Mono, float32)
-        samples = preprocess_audio(wav_path)
+        samples = load_audio(wav_path)
         if samples is None:
             return False
             

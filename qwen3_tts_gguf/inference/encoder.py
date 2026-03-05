@@ -5,7 +5,6 @@ import onnxruntime as ort
 from . import logger
 from .schema.result import TTSResult
 from .utils.mel import MelExtractor
-from .utils.audio import preprocess_audio
 
 class CodecEncoder:
     """音频码本编码器：将原始音频转换为 Codec IDs。"""
