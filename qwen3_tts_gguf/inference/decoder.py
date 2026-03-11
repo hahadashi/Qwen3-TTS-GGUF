@@ -40,28 +40,38 @@ class StatefulDecoder:
     KV_CACHE_WINDOW = 72
     SAMPLES_PER_FRAME = 1920
     
-    def __init__(self, onnx_path: str, use_dml: bool = True, chunk_size: int = 12):
+    def __init__(self, onnx_path: str, onnx_provider: str = 'CPU', chunk_size: int = 12):
         """
         初始化解码器。
         
         Args:
             onnx_path: 状态化 ONNX 模型路径
-            use_dml: 是否尝试使用 DirectML 加速 (Windows GPU)
+            onnx_provider: ONNX Runtime 提供者 (CPU, CUDA, DML, TRT)
             chunk_size: 解码批大小，防止 VRAM 溢出
         """
         import onnxruntime as ort
+        from pathlib import Path
         
         self.chunk_size = chunk_size
+        self.onnx_provider = onnx_provider.upper()
         
         if not os.path.exists(onnx_path):
             raise FileNotFoundError(f"ONNX 模型不存在: {onnx_path}")
         
         # 选择 Provider
+        available_providers = ort.get_available_providers()
         providers = ['CPUExecutionProvider']
-        if use_dml:
-            available = ort.get_available_providers()
-            if 'DmlExecutionProvider' in available:
-                providers = ['DmlExecutionProvider', 'CPUExecutionProvider']
+        
+        if self.onnx_provider in ('TRT', 'TENSORRT') and 'TensorrtExecutionProvider' in available_providers:
+            providers.insert(0, ('TensorrtExecutionProvider', {
+                'trt_fp16_enable': True,
+                'trt_engine_cache_enable': True,
+                'trt_engine_cache_path': Path(onnx_path).parent / 'trt_cache',
+            }))
+        elif self.onnx_provider == 'DML' and 'DmlExecutionProvider' in available_providers:
+            providers.insert(0, 'DmlExecutionProvider')
+        elif self.onnx_provider == 'CUDA' and 'CUDAExecutionProvider' in available_providers:
+            providers.insert(0, 'CUDAExecutionProvider')
 
         sess_opts = ort.SessionOptions()
         sess_opts.log_severity_level = 3

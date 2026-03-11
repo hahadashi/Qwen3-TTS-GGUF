@@ -20,7 +20,7 @@ def convert_to_fp16(input_path):
             keep_io_types=False,
             min_positive_val=1e-7,
             max_finite_val=65504,
-            op_block_list=['LayerNormalization', 'Softmax', 'Range'] 
+            op_block_list=['LayerNormalization', 'Softmax', 'Range', 'Conv'] 
         )
         onnx.save(model_fp16, output_path)
         print(f"   ✅ [成功] 已保存 FP16 模型。")
@@ -89,7 +89,7 @@ def main():
         convert_to_fp16(model_path)
         
         # # 2. 动态量化为 INT8 
-        # convert_to_int8(model_path)
+        convert_to_int8(model_path)
         
         # # 3. 权重量化为 INT4 
         # convert_to_int4(model_path)

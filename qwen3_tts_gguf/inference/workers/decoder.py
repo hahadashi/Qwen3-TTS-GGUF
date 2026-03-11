@@ -59,7 +59,7 @@ def handle_decode_task(req: DecodeRequest, decoder, sessions, response_queue, re
         response_queue.put(DecoderResponse(msg_type="FINISH", task_id=req.task_id))
 
 
-def decoder_worker_proc(codes_queue, pcm_queue, decoder_onnx_path, chunk_size=12, record_queue=None):
+def decoder_worker_proc(codes_queue, pcm_queue, decoder_onnx_path, onnx_provider='CPU', chunk_size=12, record_queue=None):
     """
     解码子进程工人 (DecoderWorker)。
     支持多会话状态管理 (Session-based State Management)。
@@ -67,7 +67,7 @@ def decoder_worker_proc(codes_queue, pcm_queue, decoder_onnx_path, chunk_size=12
     from ..decoder import StatefulDecoder
     os.environ["OMP_NUM_THREADS"] = "4"
     
-    decoder = StatefulDecoder(decoder_onnx_path, use_dml=True, chunk_size=chunk_size)
+    decoder = StatefulDecoder(decoder_onnx_path, onnx_provider=onnx_provider, chunk_size=chunk_size)
     pcm_queue.put(DecoderResponse(msg_type="READY", task_id="decoder"))
     print(f"🔊 [DecoderWorker] 已就绪 (Provider: {decoder.active_provider})")
     

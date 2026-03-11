@@ -17,7 +17,7 @@ def main():
 
     # 初始化引擎
     print("🚀 [Base-Clone] 正在初始化 TTS 引擎...")
-    engine = TTSEngine(model_dir="model-base")
+    engine = TTSEngine(model_dir="model-base", onnx_provider="CUDA")
     stream = engine.create_stream()
 
     # 确保输出目录存在

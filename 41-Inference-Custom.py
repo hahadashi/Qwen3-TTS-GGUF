@@ -177,7 +177,7 @@ def main():
     
     # 1. 初始化引擎
     print(f"🚀 [Custom-Inference] 正在初始化引擎")
-    engine = TTSEngine(model_dir="model-custom")
+    engine = TTSEngine(model_dir="model-custom", onnx_provider='CUDA')
     stream = engine.create_stream()
     
     # 确保输出目录存在

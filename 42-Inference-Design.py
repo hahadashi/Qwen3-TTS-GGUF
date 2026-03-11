@@ -264,7 +264,7 @@ def main():
     
     # 初始化引擎
     print(f"🚀 [Design-Inference] 正在初始化引擎...")
-    engine = TTSEngine(model_dir="model-design")
+    engine = TTSEngine(model_dir="model-design", onnx_provider="CUDA")
     stream = engine.create_stream()
     
     # 确保输出目录存在
