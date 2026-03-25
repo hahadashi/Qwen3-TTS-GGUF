@@ -195,7 +195,8 @@ class PromptBuilder:
         if hasattr(self.assets, 'talker_codec_embedding') and self.assets.talker_codec_embedding is not None:
             codec_emb_layer = self.assets.talker_codec_embedding
             # 批量获取 embeddings，与 Native API 方式一致
-            think_token_tensor = torch.tensor([think_tokens], dtype=torch.long)
+            think_token_tensor = torch.tensor([think_tokens], dtype=torch.long,
+                                                device=self.assets.talker_codec_embedding.weight.device)
             think_embeds = codec_emb_layer(think_token_tensor)[0]  # [num_tokens, hidden]
             for i, tid in enumerate(think_tokens):
                 if tid < codec_emb_layer.weight.shape[0]:
@@ -310,7 +311,7 @@ class PromptBuilder:
         # - Layer 0: talker_codec_embedding (vocab=3072)
         # - Layer 1-15: predictor.codec_embeddings[q-1] (vocab=2048)
         for t in range(ref_len):
-            frame_sum = torch.zeros(hidden_dim)
+            frame_sum = torch.zeros(hidden_dim, device=self.assets.codec_embeddings.device)
             for q in range(16):
                 code = ref_codes[t, q].item()
                 if q == 0:

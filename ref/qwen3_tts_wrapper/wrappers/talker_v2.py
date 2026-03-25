@@ -259,10 +259,6 @@ class TalkerWrapperV2:
         position_ids[2] = position  # height
         position_ids[3] = position  # width (NOT 0!)
 
-        # Debug: 打印位置信息
-        if position < 55:  # 只打印前几步
-            print(f"    [Decode Debug] position={position}, position_ids=[{position}, {position}, {position}, 0]")
-
         # 不传递 attention_mask，让 HuggingFace 内部处理
         # 当使用 DynamicCache 时，模型会自动处理因果注意力
         logits, new_state, last_hidden = self.decode_step(

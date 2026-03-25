@@ -15,6 +15,13 @@ import torch
 from typing import Optional
 from dataclasses import dataclass
 import time
+from datetime import datetime
+
+# 日志辅助函数：带时间戳
+def _log(msg: str = ""):
+    """带时间戳的日志输出"""
+    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    print(f"[{ts}] {msg}")
 
 # V2 Wrappers
 from ..wrappers.talker_v2 import TalkerWrapperV2
@@ -95,6 +102,7 @@ class StreamConfig:
     decode_audio: bool = True        # 是否解码音频
     chunk_size: int = 12             # 累积多少帧后解码 (12帧 = 960ms)
     streaming: bool = True           # True=流式解码, False=整段一次性解码
+    parallel_decode: bool = True     # 启用并行解码 (解码与生成并行执行)
 
     # ==================== 音频归一化参数 ====================
 
@@ -141,6 +149,8 @@ class StreamingEngine:
         model,  # Qwen3TTSModel or Qwen3TTSForConditionalGeneration
         device: str = "cpu",
         assets_dir: Optional[str] = None,
+        debug: bool = False,
+        dtype: str = "auto",
     ):
         """
         初始化 StreamingEngine
@@ -149,8 +159,25 @@ class StreamingEngine:
             model: Qwen3TTSModel 实例或 Qwen3TTSForConditionalGeneration
             device: 设备
             assets_dir: 预处理资产目录 (可选)
+            debug: 是否启用调试输出 (默认 False, 启用会影响性能)
+            dtype: 推理精度 ("auto"=GPU自动fp16/CPU fp32, "float32", "float16", "bfloat16")
         """
         self.device = device
+        self.debug = debug
+
+        # 推理精度
+        if dtype == "auto":
+            self.use_autocast = (device != "cpu")
+            self.autocast_dtype = torch.float16
+        elif dtype == "float16":
+            self.use_autocast = True
+            self.autocast_dtype = torch.float16
+        elif dtype == "bfloat16":
+            self.use_autocast = True
+            self.autocast_dtype = torch.bfloat16
+        else:  # float32
+            self.use_autocast = False
+            self.autocast_dtype = torch.float32
 
         # 处理不同类型的模型输入
         # Qwen3TTSModel 包装类有 .model 属性
@@ -209,14 +236,14 @@ class StreamingEngine:
         self.codec_encoder = CodecEncoderWrapper(ref_model)
         self.speaker_encoder = SpeakerEncoderWrapper(ref_model)
 
-        print(f"[StreamingEngine] 初始化完成")
-        print(f"  - TalkerWrapperV2: OK")
-        print(f"  - PredictorWrapperV2: OK")
-        print(f"  - DecoderWrapperV3 (GGUF Compatible): OK")
-        print(f"  - CodecEncoderWrapper: OK")
-        print(f"  - SpeakerEncoderWrapper: OK")
-        print(f"  - codec_bos_id: {self.codec_bos_id}")
-        print(f"  - codec_eos_id: {self.codec_eos_id}")
+        _log(f"[StreamingEngine] 初始化完成")
+        _log(f"  - TalkerWrapperV2: OK")
+        _log(f"  - PredictorWrapperV2: OK")
+        _log(f"  - DecoderWrapperV3 (GGUF Compatible): OK")
+        _log(f"  - CodecEncoderWrapper: OK")
+        _log(f"  - SpeakerEncoderWrapper: OK")
+        _log(f"  - codec_bos_id: {self.codec_bos_id}")
+        _log(f"  - codec_eos_id: {self.codec_eos_id}")
 
     # ========== 语言ID映射 ==========
 
@@ -305,7 +332,7 @@ class StreamingEngine:
             # 返回: (wavs: List[np.ndarray], sample_rate: int)
             encoded = {"audio_codes": codes_to_decode}
             wavs, sr = self.model.speech_tokenizer.decode(encoded)
-            full_audio = torch.from_numpy(wavs[0])  # [samples]
+            full_audio = torch.from_numpy(wavs[0]).to(self.device)  # [samples]
 
             # 如果使用了参考 codes，移除对应的音频部分 (和 Native API 一样)
             if should_trim_ref and ref_len > 0:
@@ -474,6 +501,7 @@ class StreamingEngine:
 
         # ========== 流式模式: 初始化 StatefulDecoderWrapper ==========
         stateful_decoder = None
+        async_decoder = None
         if streaming and decode_audio:
             from ..wrappers.stateful_decoder import OverlapDecoderWrapper
             # 获取 PyTorch 原始 decoder 模型
@@ -482,7 +510,22 @@ class StreamingEngine:
             # 预解码 ref_codes 初始化历史 (对标 GGUF final_state)
             if prompt_data.ref_codes is not None and prompt_data.ref_codes.numel() > 0:
                 stateful_decoder.warmup(prompt_data.ref_codes)
-            print(f"  [OverlapDecoder] 初始化完成, 历史帧: {stateful_decoder.history_length}")
+            _log(f"  [OverlapDecoder] 初始化完成, 历史帧: {stateful_decoder.history_length}")
+
+            # ========== 并行解码: 初始化 AsyncAudioDecoder ==========
+            if config.parallel_decode:
+                from .async_decoder import AsyncAudioDecoder
+
+                # 包装解码函数 (闭包捕获 stateful_decoder)
+                def decode_fn(chunk_codes):
+                    chunk_tensor = torch.cat(chunk_codes, dim=0)
+                    return stateful_decoder.decode_chunk(chunk_tensor, is_final=False)
+
+                async_decoder = AsyncAudioDecoder(
+                    decode_fn=decode_fn,
+                    chunk_size=chunk_size,
+                )
+                _log(f"  [AsyncDecoder] 并行解码已启用, chunk_size={chunk_size}")
 
         # ========== 记录起始时间 ==========
         timing_data["loop_start"] = time.time()
@@ -500,6 +543,10 @@ class StreamingEngine:
             # 累积到 chunk_buffer
             chunk_buffer.append(step_codes)
 
+            # 并行模式: 提交 frame 到异步解码器
+            if async_decoder is not None:
+                async_decoder.submit_frame(step_codes)
+
             # GGUF 风格：简洁判断
             # - streaming=False: 跳过，继续累积
             # - buffer 未满: 跳过，继续累积
@@ -513,8 +560,24 @@ class StreamingEngine:
                 timing_data["chunk_gen_times"].append(chunk_gen_time)
                 last_chunk_time = time.time()
 
-                if stateful_decoder is not None:
-                    # 流式模式: 使用 StatefulDecoderWrapper (left_context overlap)
+                if async_decoder is not None:
+                    # 并行模式: 非阻塞提交解码任务，继续生成
+                    async_decoder.submit_chunk()
+                    # 尝试收集已完成的音频
+                    try:
+                        audio = async_decoder.get_audio(timeout=0)
+                        if audio is not None and audio.numel() > 0:
+                            audio_chunks.append(audio)
+                            chunk_idx = len(audio_chunks)
+                            total_audio_ms = sum(a.shape[0] for a in audio_chunks) / 24.0
+                            _log(f"  [Async] chunk {chunk_idx}: {chunk_size} frames, "
+                                  f"audio {audio.shape[0]/24000:.3f}s, "
+                                  f"gen_time {chunk_gen_time:.3f}s, "
+                                  f"cumulative_audio {total_audio_ms:.0f}ms")
+                    except RuntimeError as e:
+                        _log(f"  [Async] 解码错误: {e}")
+                elif stateful_decoder is not None:
+                    # 串行流式模式: 使用 StatefulDecoderWrapper (left_context overlap)
                     chunk_tensor = torch.cat(chunk_buffer, dim=0)  # [N, 16]
                     audio_chunk = stateful_decoder.decode_chunk(
                         chunk_tensor, is_final=False
@@ -524,7 +587,7 @@ class StreamingEngine:
                         # 流式日志: 每个 chunk 的解码时间和累计音频时长
                         chunk_idx = len(audio_chunks)
                         total_audio_ms = sum(a.shape[0] for a in audio_chunks) / 24.0
-                        print(f"  [Stream] chunk {chunk_idx}: {len(chunk_buffer)} frames, "
+                        _log(f"  [Stream] chunk {chunk_idx}: {len(chunk_buffer)} frames, "
                               f"audio {audio_chunk.shape[0]/24000:.3f}s, "
                               f"gen_time {chunk_gen_time:.3f}s, "
                               f"cumulative_audio {total_audio_ms:.0f}ms")
@@ -544,10 +607,25 @@ class StreamingEngine:
         timing_data["chunk_gen_times"].append(time.time() - last_chunk_time)
 
         if decode_audio:
-            # 解码剩余 chunk
-            if chunk_buffer:
-                if stateful_decoder is not None:
-                    # 流式模式: 最后一个 chunk
+            # ========== 并行模式: 刷新并收集所有音频 ==========
+            if async_decoder is not None:
+                # 提交剩余 codes
+                if chunk_buffer:
+                    async_decoder.submit_chunk()
+
+                # 等待所有解码完成并收集音频
+                audio = async_decoder.flush()
+                async_decoder.shutdown()
+
+                if audio.numel() > 0:
+                    _log(f"  [Async] 完成: 总音频 {audio.shape[0]/24000:.3f}s")
+                else:
+                    audio = torch.tensor([], device=self.device)
+
+            # ========== 串行流式模式 ==========
+            elif stateful_decoder is not None:
+                # 解码剩余 chunk
+                if chunk_buffer:
                     chunk_tensor = torch.cat(chunk_buffer, dim=0)
                     final_audio = stateful_decoder.decode_chunk(
                         chunk_tensor, is_final=True
@@ -556,11 +634,19 @@ class StreamingEngine:
                         audio_chunks.append(final_audio)
                         chunk_idx = len(audio_chunks)
                         total_audio_ms = sum(a.shape[0] for a in audio_chunks) / 24.0
-                        print(f"  [Stream] chunk {chunk_idx} (final): {len(chunk_buffer)} frames, "
+                        _log(f"  [Stream] chunk {chunk_idx} (final): {len(chunk_buffer)} frames, "
                               f"audio {final_audio.shape[0]/24000:.3f}s, "
                               f"cumulative_audio {total_audio_ms:.0f}ms")
+
+                # 合并音频
+                if audio_chunks:
+                    audio = torch.cat(audio_chunks, dim=0)
                 else:
-                    # 非流式模式: 使用 ref 上下文 (和 Native API 一样)
+                    audio = torch.tensor([], device=self.device)
+
+            # ========== 非流式模式 ==========
+            else:
+                if chunk_buffer:
                     remaining_audio = self._decode_chunk_buffer(
                         chunk_buffer,
                         ref_codes=prompt_data.ref_codes,
@@ -569,23 +655,23 @@ class StreamingEngine:
                     if remaining_audio is not None and remaining_audio.numel() > 0:
                         audio_chunks.append(remaining_audio.flatten())
 
-        # 合并音频
-        if audio_chunks:
-            audio = torch.cat(audio_chunks, dim=0)
-
-            # Audio normalization (可选)
-            # 由于 StreamingEngine 的解码可能与 Native API 有差异，
-            # 这里提供一个简单的归一化选项来匹配 Native API 的输出水平
-            if config.normalize_audio and audio.numel() > 0:
-                # 目标 RMS (基于 Native API 的典型值)
-                target_rms = config.target_rms
-                current_rms = torch.sqrt(torch.mean(audio ** 2))
-                if current_rms > 0:
-                    audio = audio * (target_rms / current_rms)
-                    # 防止削波
-                    audio = torch.clamp(audio, min=-1.0, max=1.0)
+                # 合并音频
+                if audio_chunks:
+                    audio = torch.cat(audio_chunks, dim=0)
+                else:
+                    audio = torch.tensor([], device=self.device)
         else:
-            audio = torch.tensor([])
+            audio = torch.tensor([], device=self.device)
+
+        # Audio normalization (可选)
+        if config.normalize_audio and audio.numel() > 0:
+            # 目标 RMS (基于 Native API 的典型值)
+            target_rms = config.target_rms
+            current_rms = torch.sqrt(torch.mean(audio ** 2))
+            if current_rms > 0:
+                audio = audio * (target_rms / current_rms)
+                # 防止削波
+                audio = torch.clamp(audio, min=-1.0, max=1.0)
 
         timing_data["total_steps"] = step_count
 
@@ -680,21 +766,15 @@ class StreamingEngine:
 
         # ========== 1. Prefill 阶段 ==========
         prefill_start = time.time()
-        print(f"  [Timing] Prefill start: t={prefill_start - timing_data.get('loop_start', prefill_start):.3f}s")
-
-        # Debug: 打印 prompt_data 信息
-        print(f"  [Prefill Debug] prefill_embeds shape: {prompt_data.prefill_embeds.shape}")
-        trailing_shape = prompt_data.trailing_text_embeds.shape if prompt_data.trailing_text_embeds is not None else None
-        print(f"  [Prefill Debug] trailing_text_embeds shape: {trailing_shape}")
 
         # GGUF 风格: prefill 返回 logits，直接用于第一次采样
-        initial_logits, last_hidden, talker_state = self.talker.prefill(
-            inputs_embeds=prompt_data.prefill_embeds,
-            attention_mask=prompt_data.prefill_attention_mask,
-            position_ids=prompt_data.prefill_position_ids,
-        )
+        with torch.autocast(device_type=self.device, enabled=self.use_autocast, dtype=self.autocast_dtype):
+            initial_logits, last_hidden, talker_state = self.talker.prefill(
+                inputs_embeds=prompt_data.prefill_embeds,
+                attention_mask=prompt_data.prefill_attention_mask,
+                position_ids=prompt_data.prefill_position_ids,
+            )
         timing_data["prefill_time"] = (time.time() - prefill_start) * 1000  # ms
-        print(f"  [Timing] Prefill done: {timing_data['prefill_time']:.1f}ms")
 
         # ========== 2. 初始化状态 ==========
         text_pool_index = 0  # 追踪文本池索引
@@ -705,23 +785,21 @@ class StreamingEngine:
             device=last_hidden.device,
             dtype=last_hidden.dtype,
         )
-        print(f"  [Timing] Generation loop start...")
 
         # ========== 4. 生成循环 ==========
+        _autocast_device = self.device
         for step in range(config.max_frames):
             # ----- 4.1 Talker Stage (大师决策) -----
             # 第一步: 使用 prefill 的 logits，后续步骤使用 decode_step_simple
             if step == 0:
                 logits = initial_logits
                 hidden = last_hidden
-                print(f"    [Step {step} Debug] Using prefill logits, state.position={talker_state.position}")
             else:
-                print(f"    [Step {step} Debug] Before decode: state.position={talker_state.position}")
-                logits, talker_state, hidden = self.talker.decode_step_simple(
-                    fused_embed=fused_embed,
-                    state=talker_state,
-                )
-                print(f"    [Step {step} Debug] After decode: state.position={talker_state.position}")
+                with torch.autocast(device_type=_autocast_device, enabled=self.use_autocast, dtype=self.autocast_dtype):
+                    logits, talker_state, hidden = self.talker.decode_step_simple(
+                        fused_embed=fused_embed,
+                        state=talker_state,
+                    )
 
             # ----- 4.1.5 EOS Logit Boosting -----
             # 注意: GGUF 和 Native API 都不使用 EOS boosting
@@ -729,29 +807,26 @@ class StreamingEngine:
             # 如果 EOS 不被采样，应该调查 logits 为什么不同
             # 而不是强行提升 EOS logit
             if config.enable_eos_boost:
-                # 保留配置选项，但默认禁用
-                # 只有在调试时才启用
                 if step >= 5 and step % 10 == 0:
                     eos_logit = logits[0, self.codec_eos_id].item()
                     max_logit = logits[0].max().item()
-                    print(f"    [Step {step} EOS Debug] logit={eos_logit:.2f}, max={max_logit:.2f}")
+                    _log(f"    [Step {step} EOS Debug] logit={eos_logit:.2f}, max={max_logit:.2f}")
 
             # ----- 4.2 采样 codec_0 -----
-            codec_0 = self._sample_codec_0(logits[0], talker_sampler)
+            # 确保使用 float32 进行采样，避免 float16 精度问题
+            codec_0 = self._sample_codec_0(logits[0].float(), talker_sampler)
 
-            # Debug: 打印 codec_0 值和 EOS 概率
-            if step < 5:  # 只打印前5帧
-                # 打印原始 logits 信息
+            # Debug: 打印 codec_0 值和 EOS 概率 (仅 debug 模式)
+            if self.debug and step < 5:
                 eos_logit = logits[0, self.codec_eos_id].item()
                 max_logit = logits[0].max().item()
                 probs = torch.softmax(logits[0], dim=-1)
                 eos_prob = probs[self.codec_eos_id].item()
                 top_5_probs, top_5_indices = torch.topk(probs[:2048], 5)
-                print(f"  [Step {step}] codec_0={codec_0}, EOS prob={eos_prob:.6f}, EOS logit={eos_logit:.4f}, max_logit={max_logit:.4f}")
-                print(f"    Top 5 (0-2047): {[(idx.item(), f'{p.item():.4f}') for idx, p in zip(top_5_indices, top_5_probs)]}")
-                # Check EOS rank
+                _log(f"  [Step {step}] codec_0={codec_0}, EOS prob={eos_prob:.6f}, EOS logit={eos_logit:.4f}, max_logit={max_logit:.4f}")
+                _log(f"    Top 5 (0-2047): {[(idx.item(), f'{p.item():.4f}') for idx, p in zip(top_5_indices, top_5_probs)]}")
                 eos_rank = (logits[0] >= logits[0, self.codec_eos_id]).sum().item()
-                print(f"    EOS rank (after boost): {eos_rank} / {logits.shape[-1]}")
+                _log(f"    EOS rank (after boost): {eos_rank} / {logits.shape[-1]}")
 
             # ----- 4.3 更新采样器历史 (关键!) -----
             # GGUF 参考: stream.py:304 - talker_sampler.accept(code_0)
@@ -763,11 +838,12 @@ class StreamingEngine:
 
             # ----- 4.5 Predictor Stage (工匠预测) -----
             predictor_start = time.time()
-            codes_16, embeddings_16 = self.predictor.predict_frame(
-                master_hidden=hidden,
-                code_0=codec_0,
-                sampler=predictor_sampler,
-            )
+            with torch.autocast(device_type=_autocast_device, enabled=self.use_autocast, dtype=self.autocast_dtype):
+                codes_16, embeddings_16 = self.predictor.predict_frame(
+                    master_hidden=hidden,
+                    code_0=codec_0,
+                    sampler=predictor_sampler,
+                )
             timing_data["predictor_loop_times"].append(
                 (time.time() - predictor_start) * 1000
             )
@@ -775,17 +851,6 @@ class StreamingEngine:
             # ----- 4.6 Feedback Stage (音频反馈) -----
             feedback_start = time.time()
             audio_summed = torch.stack(embeddings_16).sum(dim=0)  # [1, hidden]
-
-            # Debug: 打印 audio_summed 和 fused_embed 的统计信息
-            if step < 3:
-                print(f"    audio_summed: mean={audio_summed.mean().item():.4f}, std={audio_summed.std().item():.4f}, max={audio_summed.max().item():.4f}")
-                # 检查 embeddings_16 的形状
-                print(f"    embeddings_16 count: {len(embeddings_16)}, each shape: {embeddings_16[0].shape}")
-                # 检查每个 embedding 的统计
-                for i, emb in enumerate(embeddings_16[:3]):
-                    print(f"      emb[{i}]: mean={emb.mean().item():.4f}, std={emb.std().item():.4f}")
-                # 检查 codec codes
-                print(f"    codes_16: {codes_16[0, :5].tolist()}...")
 
             # GGUF 风格: audio_summed + text_vec
             # GGUF 参考 talker.py:89-95:
@@ -810,10 +875,6 @@ class StreamingEngine:
                     text_pool_index,
                 )
 
-            # Debug: 打印 fused_embed 的统计信息
-            if step < 3:
-                print(f"    fused_embed: mean={fused_embed.mean().item():.4f}, std={fused_embed.std().item():.4f}, max={fused_embed.max().item():.4f}")
-
             # 递增文本池索引 (GGUF: step_idx += 1 在 fusion 之后)
             text_pool_index += 1
 
@@ -830,6 +891,8 @@ class StreamingEngine:
         model_path: str,
         device: str = "cpu",
         assets_dir: Optional[str] = None,
+        debug: bool = False,
+        dtype: str = "auto",
     ) -> "StreamingEngine":
         """
         从预训练模型创建 StreamingEngine
@@ -838,17 +901,19 @@ class StreamingEngine:
             model_path: 模型路径
             device: 设备
             assets_dir: 预处理资产目录
+            debug: 是否启用调试输出
+            dtype: 推理精度 ("auto"=GPU自动fp16/CPU fp32, "float32", "float16", "bfloat16")
 
         Returns:
             engine: StreamingEngine 实例
         """
         from qwen_tts import Qwen3TTSModel
 
-        print(f"[StreamingEngine] 加载模型: {model_path}")
+        _log(f"[StreamingEngine] 加载模型: {model_path}")
         model = Qwen3TTSModel.from_pretrained(
             model_path,
             local_files_only=True,
             device_map=device,
         )
 
-        return cls(model=model, device=device, assets_dir=assets_dir)
+        return cls(model=model, device=device, assets_dir=assets_dir, debug=debug, dtype=dtype)

@@ -117,7 +117,7 @@ class OverlapDecoderWrapper:
         # 5. 更新历史
         chunk_frames = chunk_tensor.shape[0]
         for i in range(chunk_frames):
-            self.state.code_history.append(chunk_tensor[i].clone().cpu())
+            self.state.code_history.append(chunk_tensor[i].clone())
 
         if len(self.state.code_history) > self.LEFT_CONTEXT_SIZE:
             self.state.code_history = self.state.code_history[-self.LEFT_CONTEXT_SIZE:]

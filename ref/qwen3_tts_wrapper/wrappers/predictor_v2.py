@@ -301,12 +301,6 @@ class PredictorWrapperV2:
 
         embeddings.append(code_0_embed)  # [batch, talker_hidden]
 
-        # Debug: 打印第一个 embedding 的统计
-        if len(embeddings) == 1:
-            print(f"    [Embed Debug] code_0={code_0}, emb shape={code_0_embed.shape}")
-            print(f"      emb[0] stats: mean={code_0_embed[0].mean().item():.6f}, std={code_0_embed[0].std().item():.6f}")
-            print(f"      emb[0] first 5: {code_0_embed[0, :5].tolist()}")
-
         # 1. Prefill: 生成 codec_1
         logits_1, state = self.prefill(master_hidden, code_0)
 
