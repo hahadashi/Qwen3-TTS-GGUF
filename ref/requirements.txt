@@ -1,0 +1,60 @@
+# Qwen3-TTS PyTorch CPU 推理依赖
+#
+# 安装方式：
+#   pip install -r requirements.txt
+
+# ================================
+# 核心依赖 (必需)
+# ================================
+
+# PyTorch 核心
+torch>=2.10.0
+torchaudio>=2.10.0
+torchvision>=0.25.0
+
+# Transformers 和加速库
+transformers==4.57.6
+accelerate==1.12.0
+
+# 音频处理
+librosa>=0.11.0
+soundfile>=0.13.0
+sentencepiece>=0.2.1
+sox>=1.5.0  # 需要 SoX 命令行工具 (http://sox.sourceforge.net/)
+
+# 其他核心依赖
+einops>=0.8.2
+numpy>=1.24.0
+scipy>=1.17.0
+onnxruntime>=1.24.0
+
+# ================================
+# 可选依赖
+# ================================
+
+# 音频播放支持 (任选其一)
+# sounddevice  # 跨平台音频播放
+# pyaudio      # Windows/Linux 音频播放
+# pygame       # 跨平台音频播放
+
+# 测试框架
+pytest>=9.0.0
+pytest-cov>=7.0.0
+
+# ================================
+# 说明
+# ================================
+#
+# 1. 最小安装 (仅核心功能):
+#    pip install torch torchaudio transformers accelerate librosa soundfile sentencepiece einops
+#
+# 2. 完整安装 (包含测试和音频播放):
+#    pip install -r requirements.txt
+#
+# 3. GPU 支持 (可选):
+#    pip install flash-attn --no-build-isolation
+#
+# 4. 模型下载:
+#    使用 huggingface-cli 或 modelscope 下载完整模型
+#
+# ================================
